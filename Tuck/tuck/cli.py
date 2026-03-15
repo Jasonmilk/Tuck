@@ -1,40 +1,43 @@
 #!/usr/bin/env python3
 import argparse
 import hashlib
-import json
 import os
 import sys
 from pathlib import Path
-from .kernel import TuckKernel
+
+# 兼容包运行
+try:
+    from .kernel import TuckKernel
+except ImportError:
+    from kernel import TuckKernel
 
 def main():
     parser = argparse.ArgumentParser(description="Tuck CLI - 管理中心")
-    # 新增 --set 功能
-    parser.add_argument("--set", nargs=2, metavar=('KEY', 'VALUE'), help="设置配置项，如: --set explorer_password 123456")
-    
+    parser.add_argument("--set", nargs=2, metavar=('KEY', 'VALUE'), help="设置配置，例如: --set explorer_password 123456")
     parser.add_argument("-l", "--limit", type=int, default=20)
     parser.add_argument("--vault", default="~/.tuck_vault")
     args = parser.parse_args()
 
-    kernel = TuckKernel(args.vault)
+    # 初始化内核
+    vault_path = os.path.expanduser(args.vault)
+    kernel = TuckKernel(vault_path)
 
-    # 处理密码设置
     if args.set:
         key, value = args.set
         if key == "explorer_password":
-            pass_file = Path(os.path.expanduser(args.vault)) / ".web_pass"
-            # 使用 SHA-256 哈希存储
+            # 密码文件存放在 vault 根目录下
+            pass_file = Path(vault_path) / ".web_pass"
             hashed = hashlib.sha256(value.encode()).hexdigest()
             pass_file.write_text(hashed)
-            print(f"✅ Web UI 访问密码已更新 (哈希存储于 {pass_file})")
+            print(f"✅ Web UI 访问密码已更新")
+            print(f"存储路径: {pass_file}")
             return
         else:
             print(f"❌ 未知配置项: {key}")
             return
 
-    # --- 原有列表逻辑 (简化版展示) ---
-    print(f"Tuck Vault: {args.vault}")
-    print("使用 --set explorer_password [PWD] 来设置 Web 登录密码")
+    print(f"Tuck Vault 路径: {vault_path}")
+    print("提示: 使用 --set explorer_password [你的密码] 来开启 Web 访问")
 
 if __name__ == "__main__":
     main()
