@@ -1,11 +1,6 @@
-"""
-Tuck Explorer – 现代、安全的树状对话导航 Web UI
-"""
-
 import hashlib
 import json
 import os
-import secrets
 from datetime import datetime
 from pathlib import Path
 
@@ -16,22 +11,20 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# 假设你的目录结构中有 kernel.py
-from .kernel import TuckKernel
+try:
+    from .kernel import TuckKernel
+except ImportError:
+    from kernel import TuckKernel
 
-# --- 配置 ---
 class Settings(BaseSettings):
     tuck_vault_dir: str = Field("~/.tuck_vault", env="TUCK_VAULT_DIR")
     model_config = SettingsConfigDict(env_file=".env")
 
 settings = Settings()
 kernel = TuckKernel(settings.tuck_vault_dir)
+app = FastAPI()
 
-app = FastAPI(title="Tuck Explorer")
-
-# --- 核心安全校验逻辑 ---
 def get_stored_hash():
-    # 从 vault 目录读取由 CLI 设置的密码哈希
     pass_file = Path(os.path.expanduser(settings.tuck_vault_dir)) / ".web_pass"
     if pass_file.exists():
         return pass_file.read_text().strip()
@@ -39,32 +32,20 @@ def get_stored_hash():
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
-    # 允许访问首页和静态资源
     if request.url.path in ["/", "/health"]:
         return await call_next(request)
-    
     user_key = request.headers.get("X-Tuck-Key")
     stored_hash = get_stored_hash()
-
-    # 如果还没设置密码，禁止所有 API 访问
     if not stored_hash:
-        return JSONResponse(status_code=403, content={"error": "Admin has not set a password via CLI."})
-
-    # 校验哈希
+        return JSONResponse(status_code=403, content={"error": "Set password first."})
     if not user_key or hashlib.sha256(user_key.encode()).hexdigest() != stored_hash:
         return JSONResponse(status_code=401, content={"error": "Unauthorized"})
-    
     return await call_next(request)
 
-# --- API 接口 ---
 @app.get("/api/commits")
 async def list_commits():
-    entries = []
     if not kernel.commits.exists(): return []
-    with os.scandir(kernel.commits) as it:
-        for e in it:
-            if e.name.endswith(".json"): entries.append(e)
-    
+    entries = [e for e in os.scandir(kernel.commits) if e.name.endswith(".json")]
     entries.sort(key=lambda x: x.stat().st_mtime, reverse=True)
     res = []
     for e in entries:
@@ -74,7 +55,6 @@ async def list_commits():
             res.append({
                 "id": data["id"],
                 "model": data["payload"].get("model", "unknown"),
-                "persona": bool(data["payload"].get("persona")),
                 "time": datetime.fromtimestamp(e.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
             })
         except: continue
@@ -83,120 +63,183 @@ async def list_commits():
 @app.get("/api/commit/{commit_id}")
 async def get_commit(commit_id: str):
     path = kernel.commits / f"{commit_id}.json"
-    if not path.exists(): raise HTTPException(status_code=404)
     async with aiofiles.open(path, "r", encoding="utf-8") as f:
         return json.loads(await f.read())
 
-# --- 前端 UI ---
 @app.get("/", response_class=HTMLResponse)
 async def ui():
     return HTMLResponse("""
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html>
 <head>
-    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8">
     <title>Tuck Explorer</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=Fira+Code:wght@400&display=swap');
-        body { background: #09090b; color: #e4e4e7; font-family: 'Inter', sans-serif; }
-        .font-mono { font-family: 'Fira Code', monospace; }
-        .glass { background: rgba(18, 18, 21, 0.8); backdrop-filter: blur(10px); border: 1px solid #27272a; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        .animate-in { animation: fadeIn 0.4s ease-out forwards; }
+        :root {
+            --bg: #09090b; --sidebar: #0c0c0e; --border: #27272a;
+            --text-main: #e4e4e7; --text-dim: #71717a; --accent: #3b82f6;
+        }
+        * { box-sizing: border-box; }
+        body { 
+            margin: 0; background: var(--bg); color: var(--text-main); 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            overflow: hidden; height: 100vh;
+        }
+
+        /* 登录屏 */
+        #auth-screen {
+            position: fixed; inset: 0; z-index: 100; background: var(--bg);
+            display: flex; align-items: center; justify-content: center;
+        }
+        .login-box {
+            background: #121214; border: 1px solid var(--border);
+            padding: 40px; border-radius: 24px; width: 320px; text-align: center;
+            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
+        }
+        input {
+            width: 100%; background: #000; border: 1px solid var(--border);
+            color: white; padding: 12px; border-radius: 8px; margin: 20px 0;
+            text-align: center; font-family: monospace; outline: none;
+        }
+        input:focus { border-color: var(--accent); }
+        button {
+            width: 100%; background: white; color: black; border: none;
+            padding: 12px; border-radius: 8px; font-weight: bold; cursor: pointer;
+        }
+
+        /* 主布局 */
+        #main-screen { display: flex; height: 100vh; visibility: hidden; }
+        
+        /* 侧边栏 */
+        aside {
+            width: 350px; background: var(--sidebar); border-right: 1px solid var(--border);
+            display: flex; flex-direction: column; flex-shrink: 0;
+        }
+        .sidebar-header { padding: 30px; border-bottom: 1px solid var(--border); font-weight: bold; font-size: 20px; }
+        
+        /* 树状时间轴 */
+        #tree {
+            flex: 1; overflow-y: auto; padding: 30px 20px 30px 45px;
+            position: relative;
+        }
+        #tree::before {
+            content: ''; position: absolute; left: 30px; top: 0; bottom: 0;
+            width: 1px; background: var(--border);
+        }
+
+        .node { position: relative; margin-bottom: 40px; cursor: pointer; }
+        .node-dot {
+            position: absolute; left: -20px; top: 5px;
+            width: 10px; height: 10px; border-radius: 50%;
+            background: #27272a; border: 2px solid var(--bg); z-index: 2;
+            transition: 0.3s;
+        }
+        .node:hover .node-dot { background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+        
+        .node-time { font-size: 11px; color: var(--text-dim); margin-bottom: 5px; font-family: monospace; }
+        .node-model { font-size: 14px; font-weight: 500; color: #d1d1d6; }
+        .node-id {
+            display: inline-block; margin-top: 8px; font-size: 10px; font-family: monospace;
+            background: #18181b; padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border);
+            color: var(--text-dim);
+        }
+        .node-id:hover { border-color: var(--accent); color: var(--accent); }
+
+        /* 内容区 */
+        main { flex: 1; overflow-y: auto; background: #050505; padding: 60px; }
+        .detail-card { max-w: 800px; margin: 0 auto; }
+        .msg {
+            margin-bottom: 30px; border-left: 2px solid var(--border);
+            padding: 5px 20px;
+        }
+        .msg-role { font-size: 10px; font-weight: bold; color: var(--accent); text-transform: uppercase; margin-bottom: 10px; }
+        .msg-content { font-size: 14px; line-height: 1.6; color: #ccc; white-space: pre-wrap; font-family: monospace; }
+
+        /* Toast提示 */
+        #toast {
+            position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+            background: var(--accent); color: white; padding: 8px 20px; border-radius: 20px;
+            font-size: 12px; font-weight: bold; opacity: 0; transition: 0.3s; pointer-events: none;
+        }
     </style>
 </head>
-<body class="min-h-screen">
-    <!-- 登录模块 -->
-    <div id="auth-screen" class="fixed inset-0 z-50 flex items-center justify-center bg-[#09090b]">
-        <div class="glass p-10 rounded-2xl w-full max-w-sm text-center">
-            <h1 class="text-2xl font-bold mb-6 tracking-tight">Tuck Explorer</h1>
-            <input id="pwd" type="password" placeholder="输入访问密码" class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 mb-4 focus:outline-none focus:border-blue-500 transition-all text-center">
-            <button onclick="login()" class="w-full bg-white text-black font-bold py-3 rounded-lg hover:bg-zinc-200 transition-all">进入系统</button>
+<body>
+    <div id="auth-screen">
+        <div class="login-box">
+            <div style="font-size: 24px; font-weight: bold;">TUCK.</div>
+            <input id="pwd" type="password" placeholder="Access Key">
+            <button onclick="login()">进入系统</button>
         </div>
     </div>
 
-    <!-- 主界面模块 -->
-    <div id="main-screen" class="hidden flex h-screen">
-        <!-- 左侧树状导航 -->
-        <aside class="w-80 border-r border-zinc-900 overflow-y-auto p-6 flex-shrink-0">
-            <h2 class="text-zinc-500 text-xs font-bold uppercase tracking-widest mb-8">Timeline</h2>
-            <div id="tree" class="relative border-l border-zinc-800 ml-2 pl-6 space-y-8"></div>
+    <div id="main-screen">
+        <aside>
+            <div class="sidebar-header">时间线</div>
+            <div id="tree"></div>
         </aside>
-        <!-- 右侧内容 -->
-        <main class="flex-1 overflow-y-auto p-12 bg-[#0c0c0e]">
-            <div id="detail" class="max-w-3xl mx-auto space-y-8">
-                <div class="text-zinc-600 text-center mt-20">请选择一个分支查看详情</div>
+        <main>
+            <div id="detail-view" class="detail-card">
+                <div style="text-align: center; color: var(--text-dim); margin-top: 100px;">
+                    请从左侧时间轴选择一个节点进行探索
+                </div>
             </div>
         </main>
     </div>
 
-    <div id="toast" class="fixed bottom-8 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-4 py-2 rounded-full text-xs font-bold opacity-0 transition-opacity pointer-events-none">已复制 ID</div>
+    <div id="toast">已复制到剪贴板</div>
 
     <script>
         let KEY = "";
         function login() {
             KEY = document.getElementById('pwd').value;
-            loadList();
+            fetchList();
         }
 
-        async function loadList() {
+        async function fetchList() {
             const r = await fetch("/api/commits", { headers: {"X-Tuck-Key": KEY} });
             if (r.ok) {
-                document.getElementById('auth-screen').classList.add('hidden');
-                document.getElementById('main-screen').classList.remove('hidden');
+                document.getElementById('auth-screen').style.display = 'none';
+                document.getElementById('main-screen').style.visibility = 'visible';
                 const data = await r.json();
                 renderTree(data);
-            } else {
-                alert("访问受限：密码错误或未设置");
-            }
+            } else { alert("验证失败"); }
         }
 
         function renderTree(data) {
             const tree = document.getElementById('tree');
             tree.innerHTML = data.map(c => `
-                <div class="relative group animate-in">
-                    <div class="absolute -left-[32.5px] top-1 w-3 h-3 rounded-full bg-zinc-900 border border-zinc-700 group-hover:border-blue-500 transition-all"></div>
-                    <div class="cursor-pointer" onclick="showDetail('${c.id}')">
-                        <div class="text-[10px] text-zinc-600 font-mono mb-1">${c.time}</div>
-                        <div class="text-sm font-medium text-zinc-300 group-hover:text-white transition-colors">${c.model}</div>
-                        <div class="inline-block mt-2 text-[10px] font-mono text-zinc-500 bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800 hover:border-zinc-600" onclick="copy('${c.id}', event)">
-                            ${c.id.slice(0,12)}
-                        </div>
-                    </div>
+                <div class="node" onclick="showDetail('${c.id}')">
+                    <div class="node-dot"></div>
+                    <div class="node-time">${c.time}</div>
+                    <div class="node-model">${c.model}</div>
+                    <div class="node-id" onclick="copyId('${c.id}', event)">${c.id.slice(0,14)}</div>
                 </div>
             `).join("");
         }
 
         async function showDetail(id) {
-            const r = await fetch(`/api/commit/${id}`, { headers: {"X-Tuck-Key": KEY} });
+            const r = await fetch(\`/api/commit/\${id}\`, { headers: {"X-Tuck-Key": KEY} });
             const c = await r.json();
-            const detail = document.getElementById('detail');
-            detail.innerHTML = `
-                <header class="border-b border-zinc-900 pb-8">
-                    <h1 class="text-3xl font-bold mb-2">${c.payload.model}</h1>
-                    <code class="text-blue-500 text-sm">${c.id}</code>
-                </header>
-                <div class="space-y-6">
-                    ${c.payload.messages.map(m => `
-                        <div class="bg-zinc-900/30 border border-zinc-800/50 p-6 rounded-xl">
-                            <div class="text-[10px] uppercase tracking-widest text-zinc-500 mb-4 font-bold">${m.role}</div>
-                            <pre class="whitespace-pre-wrap text-sm leading-relaxed text-zinc-300 font-mono">${m.content}</pre>
-                        </div>
-                    `).join("")}
-                </div>
-            `;
+            const view = document.getElementById('detail-view');
+            view.innerHTML = \`
+                <h1 style="font-size: 32px; margin-bottom: 10px;">\${c.payload.model}</h1>
+                <div style="font-family: monospace; color: var(--text-dim); margin-bottom: 50px;">ID: \${c.id}</div>
+                \${c.payload.messages.map(m => \`
+                    <div class="msg">
+                        <div class="msg-role">\${m.role}</div>
+                        <div class="msg-content">\${m.content}</div>
+                    </div>
+                \`).join("")}
+            \`;
         }
 
-        function copy(text, e) {
+        function copyId(id, e) {
             e.stopPropagation();
-            navigator.clipboard.writeText(text);
+            navigator.clipboard.writeText(id);
             const t = document.getElementById('toast');
             t.style.opacity = "1";
             setTimeout(() => t.style.opacity = "0", 2000);
         }
-        lucide.createIcons();
     </script>
 </body>
 </html>
