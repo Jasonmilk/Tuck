@@ -23,7 +23,7 @@ from urllib.parse import urlparse
 
 import aiofiles
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import Field, field_validator
@@ -32,201 +32,137 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from tuck.kernel import TuckKernel
 
 # ----------------------------------------------------------------------
-# Configuration (Pydantic Settings) – supports .env and env vars
+# Configuration (Pydantic Settings)
 # ----------------------------------------------------------------------
 
 class Settings(BaseSettings):
-    """
-    Application settings loaded from environment variables.
-    All timeouts are in seconds.
-    """
-    # Comma-separated list of backend URLs or ports.
-    # Examples: "8016,8020" or "http://10.0.0.1:8080,https://model.example.com"
     tuck_backends: str = Field("8016", env="TUCK_BACKENDS")
-
-    # API key for authentication (if empty, auth is disabled – not recommended)
     tuck_api_key: str = Field("", env="TUCK_API_KEY")
-
-    # Interval between backend health scans (seconds)
     tuck_scan_interval: int = Field(60, env="TUCK_SCAN_INTERVAL")
-
-    # Base directory for persona JSON files (supports absolute or relative path)
     tuck_personas_dir: str = Field("personas", env="TUCK_PERSONAS_DIR")
-
-    # Maximum number of concurrent connections to backends
     tuck_max_connections: int = Field(500, env="TUCK_MAX_CONNECTIONS")
-
-    # Timeout for backend model discovery probes (seconds)
     tuck_probe_timeout: float = Field(2.0, env="TUCK_PROBE_TIMEOUT")
-
-    # Total timeout for forwarded requests (seconds)
     tuck_forward_timeout: float = Field(120.0, env="TUCK_FORWARD_TIMEOUT")
-
-    # Enable request ID tracking (adds X-Request-ID header if missing)
     tuck_enable_request_id: bool = Field(True, env="TUCK_ENABLE_REQUEST_ID")
-
-    # Number of keep-alive connections to maintain
     tuck_keepalive_connections: int = Field(100, env="TUCK_KEEPALIVE_CONNECTIONS")
-
-    # Maximum number of concurrent backend probes during sync (to avoid overwhelming backends)
     tuck_probe_concurrency: int = Field(10, env="TUCK_PROBE_CONCURRENCY")
-
-    # Maximum size of persona cache (number of files)
     tuck_persona_cache_size: int = Field(128, env="TUCK_PERSONA_CACHE_SIZE")
-
-    # Maximum request body size in bytes (default 10MB)
     tuck_max_request_size: int = Field(10 * 1024 * 1024, env="TUCK_MAX_REQUEST_SIZE")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     @field_validator("tuck_backends")
     def validate_backends(cls, v: str) -> str:
-        """Ensure that after parsing, at least one backend remains."""
         if not v or not v.strip():
             raise ValueError("TUCK_BACKENDS cannot be empty")
-        parts = [p.strip() for p in v.split(",") if p.strip()]
+        parts =[p.strip() for p in v.split(",") if p.strip()]
         if not parts:
             raise ValueError("TUCK_BACKENDS must contain at least one valid backend")
         return v
 
-
 settings = Settings()
 
 # ----------------------------------------------------------------------
-# Logging & Request ID (using contextvars for async safety)
+# Logging & Request ID (Fixing the httpx KeyError Crash)
 # ----------------------------------------------------------------------
-
-logger = logging.getLogger("tuck.proxy")
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] request_id=%(request_id)s %(message)s",
-)
-
 request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="-")
 
 class RequestIDFilter(logging.Filter):
     def filter(self, record):
-        record.request_id = request_id_var.get()
+        if not hasattr(record, 'request_id'):
+            record.request_id = request_id_var.get()
         return True
 
-logger.addFilter(RequestIDFilter())
+# Setup format
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] request_id=%(request_id)s %(message)s",
+)
+logger = logging.getLogger("tuck.proxy")
+
+# 🔥 核心修复：必须把 Filter 挂载到所有的 handlers 上，防止 httpx 崩溃
+for handler in logging.getLogger().handlers:
+    handler.addFilter(RequestIDFilter())
+# 顺便静音 httpx 的底层日志，提高性能
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # ----------------------------------------------------------------------
-# Kernel Instance (shared)
+# Kernel Instance
 # ----------------------------------------------------------------------
-
-kernel = TuckKernel()
+# 初始化你刚刚替换的最新版防弹 Kernel
+kernel = TuckKernel("~/.tuck_vault")
 
 # ----------------------------------------------------------------------
-# Persona Cache (thread-safe, with mtime invalidation)
+# Persona Cache (Original implementation)
 # ----------------------------------------------------------------------
 
 class PersonaCache:
-    """
-    Simple in-memory cache for persona JSON files.
-    Entries expire when the underlying file modification time changes.
-    Thread-safe for async use with asyncio.Lock.
-    """
     def __init__(self, maxsize: int = 128):
-        self._cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}  # path_str -> (mtime, data)
+        self._cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
         self._maxsize = maxsize
         self._lock = asyncio.Lock()
 
     async def get(self, path: Path) -> Optional[Dict[str, Any]]:
-        """Return cached persona data if file hasn't changed, else None."""
         path_str = str(path)
         async with self._lock:
             try:
                 mtime = path.stat().st_mtime
             except OSError:
-                # File not accessible, remove from cache if present
                 self._cache.pop(path_str, None)
                 return None
-
             cached = self._cache.get(path_str)
             if cached and cached[0] == mtime:
                 return cached[1]
-
-            # Not in cache or stale
             return None
 
     async def set(self, path: Path, data: Dict[str, Any]) -> None:
-        """Store persona data with current mtime."""
         async with self._lock:
             try:
                 mtime = path.stat().st_mtime
             except OSError:
-                return  # cannot stat, skip caching
-
-            # If cache is full, evict oldest (simple FIFO)
+                return
             if len(self._cache) >= self._maxsize:
-                # Remove first item (Python 3.7+ dict preserves insertion order)
                 self._cache.pop(next(iter(self._cache)))
-
             self._cache[str(path)] = (mtime, data)
-
 
 persona_cache = PersonaCache(maxsize=settings.tuck_persona_cache_size)
 
 # ----------------------------------------------------------------------
-# Dynamic Router
+# Dynamic Router (Original implementation)
 # ----------------------------------------------------------------------
 
 class TuckRouter:
-    """
-    Dynamic router that maps model names to backend URLs.
-    Periodically probes backends to update the registry.
-    """
-
     def __init__(self, client: httpx.AsyncClient) -> None:
         self.client = client
         self._lock = asyncio.Lock()
-        self.registry: Dict[str, str] = {}  # model -> backend URL
+        self.registry: Dict[str, str] = {}
         self.targets: Set[str] = self._parse_backends(settings.tuck_backends)
         self._probe_semaphore = asyncio.Semaphore(settings.tuck_probe_concurrency)
-
         if not self.targets:
-            logger.warning("No valid backends configured. Proxy will not route any models.")
+            logger.warning("No valid backends configured.")
 
     def _parse_backends(self, raw: str) -> Set[str]:
-        """
-        Parse a comma-separated list of backends into normalized URLs.
-        Supports:
-          - Port numbers (e.g., "8016" → "http://127.0.0.1:8016")
-          - Full URLs (e.g., "https://model.example.com")
-        """
         targets = set()
         for item in (i.strip() for i in raw.split(",") if i.strip()):
             if item.isdigit():
-                # Assume localhost with that port
                 targets.add(f"http://127.0.0.1:{item}")
             elif "://" in item:
-                # Full URL, keep as is
                 targets.add(item.rstrip("/"))
             else:
-                # Possibly host:port without scheme, assume http
                 targets.add(f"http://{item}")
         return targets
 
     async def sync(self) -> None:
-        """
-        Probe all backends to update the model registry, with concurrency limit.
-        """
         new_registry: Dict[str, str] = {}
-
         async def probe(url: str):
             async with self._probe_semaphore:
                 try:
-                    resp = await self.client.get(
-                        f"{url}/v1/models",
-                        timeout=settings.tuck_probe_timeout,
-                    )
+                    resp = await self.client.get(f"{url}/v1/models", timeout=settings.tuck_probe_timeout)
                     if resp.status_code == 200:
-                        data = resp.json()
-                        models = [m["id"] for m in data.get("data", [])]
+                        models = [m["id"] for m in resp.json().get("data",[])]
                         return url, models
                 except Exception as e:
-                    logger.debug("Probe failed for %s: %s", url, e)
+                    pass
                 return None
 
         results = await asyncio.gather(*[probe(u) for u in self.targets])
@@ -246,34 +182,25 @@ class TuckRouter:
 
     async def all_models(self) -> List[Dict[str, str]]:
         async with self._lock:
-            return [{"id": m, "object": "model", "owned_by": "tuck"} for m in self.registry]
+            return[{"id": m, "object": "model", "owned_by": "tuck"} for m in self.registry]
 
 # ----------------------------------------------------------------------
-# Lifespan & Background Tasks
+# Lifespan
 # ----------------------------------------------------------------------
-
-# Global set to track background audit tasks for graceful shutdown
 background_audit_tasks: Set[asyncio.Task] = set()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
     client = httpx.AsyncClient(
         timeout=httpx.Timeout(settings.tuck_forward_timeout),
-        limits=httpx.Limits(
-            max_connections=settings.tuck_max_connections,
-            max_keepalive_connections=settings.tuck_keepalive_connections,
-        ),
+        limits=httpx.Limits(max_connections=settings.tuck_max_connections, max_keepalive_connections=settings.tuck_keepalive_connections),
         follow_redirects=False,
     )
     router = TuckRouter(client)
     app.state.client = client
     app.state.router = router
-
-    # Initial sync
     await router.sync()
 
-    # Background scanner
     async def scanner():
         while True:
             await asyncio.sleep(settings.tuck_scan_interval)
@@ -281,295 +208,174 @@ async def lifespan(app: FastAPI):
 
     scan_task = asyncio.create_task(scanner())
     app.state.scan_task = scan_task
-
     yield
-
-    # Shutdown: wait for all background audit tasks to complete
     if background_audit_tasks:
-        logger.info(f"Waiting for {len(background_audit_tasks)} audit tasks to finalize...")
         await asyncio.gather(*background_audit_tasks, return_exceptions=True)
-
-    # Cancel scanner and close client
     scan_task.cancel()
     await client.aclose()
 
-# ----------------------------------------------------------------------
-# FastAPI App
-# ----------------------------------------------------------------------
-
-app = FastAPI(
-    title="Tuck Proxy",
-    version="2.0",
-    lifespan=lifespan,
-    docs_url=None,  # Disable docs in production
-    redoc_url=None,
-)
-
-# CORS – must be first middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app = FastAPI(title="Tuck Proxy", version="2.0", lifespan=lifespan, docs_url=None, redoc_url=None)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 # ----------------------------------------------------------------------
-# Authentication & Request ID Middleware
+# Middlewares
 # ----------------------------------------------------------------------
-
 @app.middleware("http")
 async def authentication(request: Request, call_next):
-    """Authenticate requests using Bearer token unless auth is disabled."""
-    # Always allow OPTIONS for CORS preflight
-    if request.method == "OPTIONS":
-        return await call_next(request)
-
-    # Optional: allow unauthenticated health checks
-    if request.url.path in ["/health", "/ready"]:
+    if request.method == "OPTIONS" or request.url.path in ["/health", "/ready"]:
         return await call_next(request)
 
     api_key = settings.tuck_api_key
-    if api_key:  # auth enabled
+    if api_key:
         auth_header = request.headers.get("Authorization", "")
         if not auth_header.startswith("Bearer "):
-            return JSONResponse(
-                status_code=401,
-                content={
-                    "error": {
-                        "message": "You didn't provide an API key.",
-                        "type": "invalid_request_error",
-                    }
-                },
-            )
-        token = auth_header[7:]
-        if not secrets.compare_digest(token, api_key):
-            return JSONResponse(
-                status_code=401,
-                content={
-                    "error": {
-                        "message": "Incorrect API key provided.",
-                        "type": "invalid_request_error",
-                    }
-                },
-            )
+            return JSONResponse(status_code=401, content={"error": {"message": "You didn't provide an API key.", "type": "invalid_request_error"}})
+        if not secrets.compare_digest(auth_header[7:], api_key):
+            return JSONResponse(status_code=401, content={"error": {"message": "Incorrect API key provided.", "type": "invalid_request_error"}})
 
-    # Set request ID for logging
     if settings.tuck_enable_request_id:
-        request_id = request.headers.get("X-Request-ID")
-        if not request_id:
-            request_id = secrets.token_hex(16)
+        request_id = request.headers.get("X-Request-ID") or secrets.token_hex(16)
         request.state.request_id = request_id
         request_id_var.set(request_id)
 
     return await call_next(request)
 
-
 @app.middleware("http")
 async def safety_path_sanitizer(request: Request, call_next):
-    """
-    Prevent SSRF attacks that try to use absolute paths like 'http://evil.com'.
-    FastAPI normalizes the path, but we add an extra layer.
-    """
     path = request.scope.get("path", "")
     if path.startswith(("http://", "https://")):
-        # Replace with just the path part
-        parsed = urlparse(path)
-        request.scope["path"] = parsed.path or "/"
+        request.scope["path"] = urlparse(path).path or "/"
     return await call_next(request)
-
-
-# ----------------------------------------------------------------------
-# Exception Handlers
-# ----------------------------------------------------------------------
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Prevent crash, return consistent JSON error."""
     logger.exception("Unhandled exception for %s", request.url)
-    return JSONResponse(
-        status_code=500,
-        content={
-            "error": {
-                "message": "Tuck internal infrastructure error",
-                "type": "bridge_error",
-                "detail": str(exc) if settings.tuck_api_key else None,
-            }
-        },
-    )
-
-
-# ----------------------------------------------------------------------
-# Health & Readiness Endpoints
-# ----------------------------------------------------------------------
-
-@app.get("/health")
-async def health():
-    """Simple health check (always OK if app is running)."""
-    return {"status": "ok"}
-
-
-@app.get("/ready")
-async def readiness(request: Request):
-    """Readiness probe: checks if router has at least one backend."""
-    router: TuckRouter = request.app.state.router
-    if not router.targets:
-        return JSONResponse(status_code=503, content={"status": "no backends configured"})
-    if not router.registry:
-        return JSONResponse(status_code=503, content={"status": "no models discovered"})
-    return {"status": "ready"}
-
+    return JSONResponse(status_code=500, content={"error": {"message": "Tuck internal infrastructure error", "type": "bridge_error", "detail": str(exc) if settings.tuck_api_key else None}})
 
 # ----------------------------------------------------------------------
 # Core API Endpoints
 # ----------------------------------------------------------------------
+@app.get("/health")
+async def health(): return {"status": "ok"}
+
+@app.get("/ready")
+async def readiness(request: Request):
+    router: TuckRouter = request.app.state.router
+    if not router.targets: return JSONResponse(status_code=503, content={"status": "no backends configured"})
+    if not router.registry: return JSONResponse(status_code=503, content={"status": "no models discovered"})
+    return {"status": "ready"}
 
 @app.get("/v1/models")
 async def list_models(request: Request):
-    """Return list of discovered models."""
     router: TuckRouter = request.app.state.router
     return {"object": "list", "data": await router.all_models()}
 
-
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
-    """
-    Main proxy endpoint: forwards request to appropriate backend after:
-      - Model lookup
-      - Optional persona injection (with caching)
-      - Asynchronous audit logging to Tuck kernel
-    """
-    # --- Request size limit (prevent OOM) ---
-    content_length = request.headers.get("content-length")
-    if content_length and int(content_length) > settings.tuck_max_request_size:
+    if int(request.headers.get("content-length", 0)) > settings.tuck_max_request_size:
         raise HTTPException(status_code=413, detail="Request entity too large")
-
-    # Parse request body
     try:
         body = await request.json()
-    except json.JSONDecodeError:
+    except:
         raise HTTPException(status_code=400, detail="Invalid JSON body")
 
     model = body.get("model")
-    if not model:
-        raise HTTPException(status_code=400, detail="Missing 'model' field")
+    if not model: raise HTTPException(status_code=400, detail="Missing 'model' field")
 
-    # Lookup backend
     router: TuckRouter = request.app.state.router
     backend_url = await router.get_url(model)
-    if not backend_url:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Model '{model}' not found on any authorized backend",
-        )
+    if not backend_url: raise HTTPException(status_code=404, detail=f"Model '{model}' not found on any authorized backend")
 
-    # Prepare messages (may be mutated by persona)
-    messages = body.get("messages", [])
-    if not isinstance(messages, list):
-        raise HTTPException(status_code=400, detail="'messages' must be an array")
+    messages = body.get("messages",[])
+    is_stream = body.get("stream", False)
 
-    # --- Persona Injection (safe, cached) ---
+    # --- Persona Injection ---
     persona_name = request.headers.get("X-Tuck-Persona")
-    persona_data = None
     if persona_name:
-        # Strict validation: alphanumeric + underscore + hyphen only
-        if not re.match(r"^[a-zA-Z0-9_\-]+$", persona_name):
-            logger.warning("Invalid persona name rejected: %s", persona_name)
-            raise HTTPException(status_code=400, detail="Invalid persona name format")
-
-        # Resolve personas directory (support absolute or relative)
+        if not re.match(r"^[a-zA-Z0-9_\-]+$", persona_name): raise HTTPException(status_code=400, detail="Invalid persona name format")
         personas_base = Path(settings.tuck_personas_dir)
-        if not personas_base.is_absolute():
-            personas_base = Path(__file__).parent / personas_base
-
+        if not personas_base.is_absolute(): personas_base = Path(__file__).parent / personas_base
         persona_path = personas_base / f"{persona_name}.json"
 
-        # Try cache first
         persona_data = await persona_cache.get(persona_path)
-        if persona_data is None:
-            # Cache miss, load from disk
-            if persona_path.is_file():
-                try:
-                    async with aiofiles.open(persona_path, "r", encoding="utf-8") as f:
-                        content = await f.read()
-                    persona_data = json.loads(content)
-                    # Store in cache
-                    await persona_cache.set(persona_path, persona_data)
-                except Exception as e:
-                    # Log only relative path to avoid leaking absolute paths
-                    rel_path = persona_path.relative_to(personas_base) if personas_base in persona_path.parents else persona_path.name
-                    logger.error("Failed to load persona %s: %s", rel_path, e)
-                    raise HTTPException(status_code=500, detail="Persona loading failed")
-            else:
-                # Log only relative path
-                rel_path = persona_path.relative_to(personas_base) if personas_base in persona_path.parents else persona_path.name
-                logger.warning("Persona file not found: %s", rel_path)
+        if persona_data is None and persona_path.is_file():
+            async with aiofiles.open(persona_path, "r", encoding="utf-8") as f:
+                persona_data = json.loads(await f.read())
+            await persona_cache.set(persona_path, persona_data)
 
         if persona_data:
-            # Inject system prompt if first message is not system
-            system_prompt = persona_data.get("system_prompt")
-            if system_prompt and (not messages or messages[0].get("role") != "system"):
-                messages.insert(0, {"role": "system", "content": system_prompt})
-            # Merge additional parameters (e.g., temperature, top_p)
-            params = persona_data.get("params", {})
-            body.update(params)
-
-    # --- Asynchronous audit to Tuck kernel (non-blocking) ---
-    # Run kernel.commit in a thread pool to avoid blocking event loop
-    async def audit():
-        try:
-            await asyncio.to_thread(kernel.commit, messages, model, persona_data)
-        except Exception as e:
-            logger.error("Kernel audit failed: %s", e)
-
-    # Track task for graceful shutdown
-    task = asyncio.create_task(audit())
-    background_audit_tasks.add(task)
-    task.add_done_callback(background_audit_tasks.discard)
+            sys_prompt = persona_data.get("system_prompt")
+            if sys_prompt and (not messages or messages[0].get("role") != "system"):
+                messages.insert(0, {"role": "system", "content": sys_prompt})
+            body.update(persona_data.get("params", {}))
 
     # --- Prepare forwarding headers ---
-    # Hop-by-hop headers that must not be forwarded
-    hop_by_hop = {
-        "host", "content-length", "connection", "authorization",
-        "proxy-connection", "keep-alive", "te", "trailer", "upgrade"
-    }
-    headers = {}
-    for k, v in request.headers.items():
-        k_low = k.lower()
-        if k_low not in hop_by_hop:
-            headers[k] = v
+    hop_by_hop = {"host", "content-length", "connection", "authorization", "proxy-connection", "keep-alive", "te", "trailer", "upgrade"}
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in hop_by_hop}
+    current_req_id = getattr(request.state, "request_id", request_id_var.get())
+    if settings.tuck_enable_request_id: headers["X-Request-ID"] = current_req_id
+    headers["X-Forwarded-For"] = request.client.host if request.client else "127.0.0.1"
 
-    # Add tracing headers
-    if settings.tuck_enable_request_id:
-        headers["X-Request-ID"] = request.state.request_id
-    # Add X-Forwarded-For
-    client_host = request.client.host if request.client else "127.0.0.1"
-    headers["X-Forwarded-For"] = client_host
-
-    # --- Forward request to backend ---
     client: httpx.AsyncClient = request.app.state.client
+    backend_req = client.build_request("POST", f"{backend_url}/v1/chat/completions", json=body, headers=headers)
 
+    # 🔥 核心改造：完美拦截并提取 AI 回复
     try:
-        # Build request to backend
-        backend_req = client.build_request(
-            "POST",
-            f"{backend_url}/v1/chat/completions",
-            json=body,
-            headers=headers,
-        )
-        # Send with streaming
+        # 非流式处理
+        if not is_stream:
+            resp = await client.send(backend_req)
+            if resp.status_code == 200:
+                try:
+                    ai_reply = resp.json()["choices"][0]["message"]["content"]
+                    record_msgs = list(messages)
+                    record_msgs.append({"role": "assistant", "content": ai_reply})
+                    
+                    # 异步提交到新版 kernel，防阻塞
+                    asyncio.create_task(asyncio.to_thread(
+                        kernel.sync_history, record_msgs, model, metadata={"request_id": current_req_id}
+                    ))
+                except Exception as e:
+                    logger.error(f"非流式解析失败，跳过记录: {e}")
+            return Response(content=resp.content, status_code=resp.status_code, headers=dict(resp.headers))
+
+        # 流式处理
         resp = await client.send(backend_req, stream=True)
-        return StreamingResponse(
-            resp.aiter_bytes(),
-            status_code=resp.status_code,
-            headers=dict(resp.headers),
-        )
+        
+        async def stream_generator():
+            full_reply = ""
+            try:
+                async for chunk in resp.aiter_lines():
+                    if chunk:
+                        if chunk.startswith("data: "):
+                            data_str = chunk[6:]
+                            if data_str.strip() != "[DONE]":
+                                try:
+                                    payload = json.loads(data_str)
+                                    content = payload.get("choices",[{}])[0].get("delta", {}).get("content", "")
+                                    full_reply += content
+                                except Exception:
+                                    pass
+                        yield f"{chunk}\n"
+                    else:
+                        yield "\n"
+            finally:
+                await resp.aclose()
+                # 流结束或客户端意外断开时，只要拿到了回复，就保存下来！
+                if full_reply:
+                    record_msgs = list(messages)
+                    record_msgs.append({"role": "assistant", "content": full_reply})
+                    request_id_var.set(current_req_id) # 恢复上下文以便日志打印正常
+                    try:
+                        await asyncio.to_thread(
+                            kernel.sync_history, record_msgs, model, metadata={"request_id": current_req_id}
+                        )
+                        logger.info(f"对话流结束，已永久录入 Tuck，回复长度: {len(full_reply)}")
+                    except Exception as e:
+                        logger.error(f"流式保存到 Tuck 失败: {e}")
+
+        return StreamingResponse(stream_generator(), status_code=resp.status_code, headers=dict(resp.headers))
+
     except httpx.TimeoutException:
-        logger.error("Timeout while forwarding to %s", backend_url)
         raise HTTPException(status_code=504, detail="Backend timeout")
-    except httpx.RequestError as e:
-        logger.error("Request error forwarding to %s: %s", backend_url, e)
+    except httpx.RequestError:
         raise HTTPException(status_code=502, detail="Backend unreachable")
-    except Exception as e:
-        logger.exception("Unexpected error during forwarding")
-        raise HTTPException(status_code=500, detail="Internal proxy error")
