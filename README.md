@@ -138,5 +138,5 @@ tuck
 
 <p align="center">
   <b>Tuck - 让每一次 AI 对话都留下不可磨灭的印记。</b><br/>
-  Made with ❤️ by Jason_milk
+  Made with ❤️ by Jasonmilk
 </p>
