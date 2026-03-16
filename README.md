@@ -1,9 +1,3 @@
-这个 README.md 是项目的脸面，也是我们共同打磨出的“结晶”。为了配得上 AMD2435 服务器上那套完美的 `Kernel + Proxy + Explorer + CLI`，我为你重新设计了一个**充满极客感、排版优雅、且功能说明极其清晰**的 README。
-
-这个版本重点突出了 **“AI 对话的 Git”** 这个核心概念，并加入了我们刚刚完成的 **“交互式导航 CLI”** 的使用说明。
-
----
-
 # 🕰️ Tuck: The Git for AI Conversations
 
 <p align="center">
