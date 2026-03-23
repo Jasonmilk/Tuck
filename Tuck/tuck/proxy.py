@@ -7,6 +7,7 @@ This module provides an OpenAI-compatible gateway that:
   - Injects persona system prompts from local JSON files (with caching).
   - Audits all interactions to the Tuck kernel asynchronously (non-blocking).
   - Forwards requests with production-grade concurrency and error handling.
+  -[NEW] Integrates modular security engine for prompt sanitization.
 """
 
 import asyncio
@@ -30,11 +31,11 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from tuck.kernel import TuckKernel
+from tuck.security.engine import security_engine  # 🔥 引入独立的纯粹安全引擎
 
 # ----------------------------------------------------------------------
 # Configuration (Pydantic Settings)
 # ----------------------------------------------------------------------
-
 class Settings(BaseSettings):
     tuck_backends: str = Field("8016", env="TUCK_BACKENDS")
     tuck_api_key: str = Field("", env="TUCK_API_KEY")
@@ -73,29 +74,24 @@ class RequestIDFilter(logging.Filter):
             record.request_id = request_id_var.get()
         return True
 
-# Setup format
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] request_id=%(request_id)s %(message)s",
 )
 logger = logging.getLogger("tuck.proxy")
 
-# 🔥 核心修复：必须把 Filter 挂载到所有的 handlers 上，防止 httpx 崩溃
 for handler in logging.getLogger().handlers:
     handler.addFilter(RequestIDFilter())
-# 顺便静音 httpx 的底层日志，提高性能
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # ----------------------------------------------------------------------
 # Kernel Instance
 # ----------------------------------------------------------------------
-# 初始化你刚刚替换的最新版防弹 Kernel
 kernel = TuckKernel("~/.tuck_vault")
 
 # ----------------------------------------------------------------------
 # Persona Cache (Original implementation)
 # ----------------------------------------------------------------------
-
 class PersonaCache:
     def __init__(self, maxsize: int = 128):
         self._cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
@@ -128,9 +124,8 @@ class PersonaCache:
 persona_cache = PersonaCache(maxsize=settings.tuck_persona_cache_size)
 
 # ----------------------------------------------------------------------
-# Dynamic Router (Original implementation)
+# Dynamic Router (Original implementation - 主权恢复)
 # ----------------------------------------------------------------------
-
 class TuckRouter:
     def __init__(self, client: httpx.AsyncClient) -> None:
         self.client = client
@@ -222,7 +217,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, 
 # ----------------------------------------------------------------------
 @app.middleware("http")
 async def authentication(request: Request, call_next):
-    if request.method == "OPTIONS" or request.url.path in ["/health", "/ready"]:
+    if request.method == "OPTIONS" or request.url.path in["/health", "/ready"]:
         return await call_next(request)
 
     api_key = settings.tuck_api_key
@@ -289,6 +284,11 @@ async def chat_completions(request: Request):
     messages = body.get("messages",[])
     is_stream = body.get("stream", False)
 
+    # 🔥 核心安全层介入：遍历 messages 执行独立模块的黑名单拦截与脱敏混淆
+    for msg in messages:
+        if isinstance(msg.get("content"), str):
+            msg["content"] = security_engine.process(msg["content"])
+
     # --- Persona Injection ---
     persona_name = request.headers.get("X-Tuck-Persona")
     if persona_name:
@@ -319,7 +319,7 @@ async def chat_completions(request: Request):
     client: httpx.AsyncClient = request.app.state.client
     backend_req = client.build_request("POST", f"{backend_url}/v1/chat/completions", json=body, headers=headers)
 
-    # 🔥 核心改造：完美拦截并提取 AI 回复
+    # 🔥 核心：拦截并提取 AI 回复 (无损保留原有防阻塞写入逻辑)
     try:
         # 非流式处理
         if not is_stream:
@@ -330,7 +330,6 @@ async def chat_completions(request: Request):
                     record_msgs = list(messages)
                     record_msgs.append({"role": "assistant", "content": ai_reply})
                     
-                    # 异步提交到新版 kernel，防阻塞
                     asyncio.create_task(asyncio.to_thread(
                         kernel.sync_history, record_msgs, model, metadata={"request_id": current_req_id}
                     ))
@@ -351,7 +350,7 @@ async def chat_completions(request: Request):
                             if data_str.strip() != "[DONE]":
                                 try:
                                     payload = json.loads(data_str)
-                                    content = payload.get("choices",[{}])[0].get("delta", {}).get("content", "")
+                                    content = payload.get("choices", [{}])[0].get("delta", {}).get("content", "")
                                     full_reply += content
                                 except Exception:
                                     pass
@@ -360,11 +359,10 @@ async def chat_completions(request: Request):
                         yield "\n"
             finally:
                 await resp.aclose()
-                # 流结束或客户端意外断开时，只要拿到了回复，就保存下来！
                 if full_reply:
                     record_msgs = list(messages)
                     record_msgs.append({"role": "assistant", "content": full_reply})
-                    request_id_var.set(current_req_id) # 恢复上下文以便日志打印正常
+                    request_id_var.set(current_req_id)
                     try:
                         await asyncio.to_thread(
                             kernel.sync_history, record_msgs, model, metadata={"request_id": current_req_id}
