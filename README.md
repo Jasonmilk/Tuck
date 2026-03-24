@@ -1,132 +1,112 @@
-# 🕰️ Tuck: The Git for AI Conversations
+# 🕰️ Tuck: The Immutable Audit & Versioning Layer for AI Conversations
 
 <p align="center">
-  <b>AI 会话版本控制 | 时间穿梭机 | 多模型网关 | 人格芯片注入</b>
+  <b>面向大规模语言模型的分布式审计网关 | 内容寻址存储 | 异构算力路由</b>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.9+-blue.svg" alt="Python Version">
   <img src="https://img.shields.io/badge/FastAPI-Latest-009688.svg" alt="FastAPI">
+  <img src="https://img.shields.io/badge/Architecture-Distributed-blueviolet.svg" alt="Distributed">
   <img src="https://img.shields.io/badge/Audit-Immutable-green.svg" alt="Audit">
-  <img src="https://img.shields.io/badge/Security-Extreme-red.svg" alt="Security">
-  <img src="https://img.shields.io/badge/License-MIT-lightgrey.svg" alt="License">
+  <img src="https://img.shields.io/badge/Security-Advanced_Privacy-red.svg" alt="Security">
 </p>
 
 ---
 
-## 🌟 什么是 Tuck?
+## 🔬 1. 项目定义 (Definition)
 
-Tuck 是一个为 AI 时代设计的**不可变审计与版本控制层**。它像 Git 管理代码一样管理你的 AI 对话。
+Tuck 是一套为生成式 AI（Generative AI）设计的**不可变审计与版本控制抽象层**。在学术与工业研发流程中，LLM 的输出具有随机性与上下文依赖性，Tuck 通过物理级的拦截与持久化，将每一轮非结构化的对话碎片转化为可索引、可溯源的**有向无环图（DAG）**结构。
 
-通过将 Tuck 嵌入你的模型服务前端，它能自动捕获每一次交互，利用**内容寻址存储（Content-Addressed Storage）**技术实现极致的去重与溯源。无论是调试 Prompt、审计安全，还是回溯历史，Tuck 都是你的“时光机”。
-
-> **“AI 时代，你可以用 Tuck 定义自己的人格芯片，开启属于你的 AI 公司。”**
+其设计哲学借鉴了 Git 的内容寻址逻辑，旨在解决复杂智能体（Agent）系统中“逻辑断层”与“幻觉溯源”的痛点。
 
 ---
 
-## 🔥 核心特性
+## 核心技术特性 (Core Features)
 
-*   **💾 内容寻址存储 (CAS)**：基于 SHA256 的不可变存储，相同的回答只存一次，极致节省空间。
-*   **⏳ 时间穿梭 (Time Travel)**：Web UI 动态回溯，点击任意节点即可查看当时的完整会话上下文。
-*   **🧠 人格芯片 (Personas)**：通过 `X-Tuck-Persona` 协议，动态注入系统提示词与模型参数。
-*   **🚀 极速网关**：基于 FastAPI + HTTPX 的异步非阻塞架构，流式转发（Streaming）零延迟。
-*   **🔐 物理级安全**：多进程文件锁保障、SHA256 访问加密、无数据库依赖、零信任架构。
-*   **🛠️ 交互式 CLI**：一键部署、实时监控、密码管理，全导航式终端体验。
+*   **💾 内容寻址存储 (CAS)**：基于 SHA256 算法的不可变存储架构。系统自动识别重复的 Prompt 与 Response 片段，物理层面仅保留唯一副本，实现海量会话数据的极致去重。
+*   **⏳ 状态回溯与分支 (State Tracking)**：通过 Web UI 视觉化复现会话时空。支持点击任意节点重建完整的上下文链路，实现“对话级的断点调试”。
+*   **🧠 协议驱动的人格芯片 (Persona Injection)**：通过 `X-Tuck-Persona` 头部协议实现系统级提示词（System Prompt）与超参数（Top-P/Temperature）的物理隔离与动态注入。
+*   **📡 高延迟弹性架构 (Latency Resilience)**：针对 DeepSeek-R1 等长序列推理模型进行优化，内置 600s 级深度隧道与 KV 缓存接力机制，有效对抗 ARM 节点预填充阶段的网关超时。
+*   **🎭 企业级隐私屏障 (Cyber Camouflage)**：**[实验性功能]** 针对第三方商用 API 链路提供语义混淆（Obfuscation）支持。通过动态映射表实现私有实体的脱敏转换，有效降低意图坍缩风险并保护商业隐私。
+*   **🔗 异构网关路由**：内置商用 API 冗余开关，支持在本地私有化模型矩阵与公有云 API 之间进行无缝流量调度。
 
 ---
 
-## 🏗️ 架构概览
+## 🏗️ 3. 系统架构 (Architecture)
 
 ```mermaid
-graph LR
-    User((用户)) -->|OpenAI API| Proxy[<b>Tuck Proxy</b><br/>端口 8686]
-    Proxy -->|动态路由| LLM[LLM 后端<br/>vLLM / Ollama]
-    Proxy -.->|异步持久化| Vault[(<b>Tuck Vault</b><br/>不可变 JSON 碎片)]
+graph TD
+    User((智能体/用户)) -->|OpenAI 标准协议| Proxy[<b>Tuck Proxy</b><br/>核心控制平面]
+    Proxy -->|Load Balancing| Local_LLM[本地算力矩阵<br/>4B/7B/8B Llama.cpp]
+    Proxy -->|Commercial Fallback| OneAPI[One-API / Cloud API]
     
-    Vault --- Explorer[<b>Tuck Explorer</b><br/>Web UI 端口 8000]
-    Explorer -->|视觉回溯| User
+    Proxy -.->|Async Write| Vault[(<b>Tuck Vault</b><br/>CAS 存储/索引)]
     
-    CLI[<b>Tuck CLI</b>] -->|管理/启动| Proxy
-    CLI -->|管理/启动| Explorer
+    Vault --- Explorer[<b>Tuck Explorer</b><br/>物理溯源 UI]
+    Explorer -->|逻辑回溯| User
     
-    style Proxy fill:#3b82f6,color:#fff
-    style Vault fill:#10b981,color:#fff
-    style Explorer fill:#f59e0b,color:#fff
-    style CLI fill:#8b5cf6,color:#fff
+    CLI[<b>Tuck CLI</b>] -->|配置/安全管控| Proxy
+    
+    style Proxy fill:#2563eb,color:#fff
+    style Vault fill:#059669,color:#fff
+    style Explorer fill:#d97706,color:#fff
+    style CLI fill:#7c3aed,color:#fff
 ```
 
 ---
 
-## 🚀 快速开始
+## 🚀 4. 部署指南 (Deployment)
 
-### 1. 安装环境
+### 4.1 安装环境
 
 ```bash
 git clone https://github.com/Jasonmilk/Tuck.git
 cd Tuck
-
-# 强烈推荐以开发模式安装，即可全局使用 tuck 命令
 pip install -e .
 ```
 
-### 2. 交互式启动 (推荐)
+### 4.2 物理链路初始化 (CLI)
 
-直接输入一个命令，进入管理导航菜单：
+Tuck 提供全交互式的管理终端。直接运行 `tuck` 即可进入管理模式：
 
 ```bash
 tuck
 ```
+*在此菜单中，建议首选执行 `Option 2` 进行 Web UI 访问权限加密。*
 
-在菜单中：
-- 按 `2` 设置 WebUI 访问密码。
-- 按 `1` 然后按 `3` 一键启动 Proxy 与 Explorer 服务。
+### 4.3 环境变量对齐 (`.env`)
 
----
-
-## 💡 核心功能玩法
-
-### 🎭 使用“人格芯片” (Personas)
-在 `personas/` 目录下创建 `coder.json`:
-```json
-{
-  "system_prompt": "你是一个精通 Python 的资深架构师。",
-  "params": { "temperature": 0.2, "max_tokens": 4096 }
-}
-```
-**调用方式**：在请求头加入 `-H "X-Tuck-Persona: coder"`，Tuck 会自动完成人格注入。
-
-### 🕒 使用“时光机” (WebUI)
-访问 `http://localhost:8000`：
-1. **解锁**：输入你在 CLI 设置的密码。
-2. **追溯**：左侧查看对话流，中间查看分支节点。
-3. **复用率**：底部实时监控节点的物理复用率，看 Tuck 帮你省了多少空间。
-
----
-
-## ⚙️ 生产级配置 (`.env`)
-
-| 变量 | 说明 | 默认值 |
+| 变量 | 说明 | 推荐值 |
 | :--- | :--- | :--- |
-| `TUCK_BACKENDS` | 后端模型地址 (端口或URL) | `8016` |
-| `TUCK_API_KEY` | Proxy 访问密钥 (Bearer) | `""` |
-| `TUCK_VAULT_DIR` | 数据存储根目录 | `~/.tuck_vault` |
-| `TUCK_FORWARD_TIMEOUT` | 对话超时时间 (秒) | `120.0` |
+| `TUCK_BACKENDS` | 后端模型端口集群 | `8014,8015,8016` |
+| `TUCK_FORWARD_TIMEOUT` | 全局响应超时(秒) | `600.0` |
+| `TUCK_ENABLE_ONEAPI` | 商用通道总开关 | `false` |
+| `TUCK_OBFUSCATE_MODE` | 语义混淆模式 | `commercial` |
 
 ---
 
-## 🛡️ 安全注意事项
+## 💡 5. 核心交互规范 (Usage)
 
-1. **Vault 权限**：Tuck 默认将数据目录权限设为 `700`。请勿手动修改，保护对话隐私。
-2. **HTTPS**：在公网部署时，强烈建议使用 Nginx 反向代理并开启 SSL。
-3. **审计清理**：定期使用 `tuck` 命令中的清理选项，释放孤立节点占用的空间。
+### 🧩 人格芯片调用
+在 `personas/` 下部署 `architect.json`，请求时携带以下 Header：
+```http
+X-Tuck-Persona: architect
+```
+
+### 🌉 商用冗余介入
+当本地算力饱和或执行高精度任务时，可开启商用超车道：
+```http
+X-Tuck-Commercial: true
+```
 
 ---
 
-## 📊 性能数据
+## 🛡️ 6. 安全与审计原则
 
-- **写入延迟**：异步 IO 写入，对模型首字响应（TTFT）影响 < 2ms。
-- **并发能力**：单机支持 500+ 并发连接。
-- **存储效率**：在多轮测试对话中，节点复用率通常可达 40% - 70%。
+1.  **零数据库依赖**：Tuck 采用纯文件锁机制，不引入额外的数据库组件，确保数据在物理层面的绝对独立。
+2.  **权限最小化**：Vault 目录默认采用 `0700` 权限，仅允许 Tuck 运行账户访问。
+3.  **每日迷彩轮换**：建议通过 `cron` 定期更新 `rules/obfuscation.json` 映射表，以获得最高等级的语义安全。
 
 ---
 
@@ -137,6 +117,6 @@ tuck
 ---
 
 <p align="center">
-  <b>Tuck - 让每一次 AI 对话都留下不可磨灭的印记。</b><br/>
-  Made with ❤️ by Jasonmilk
+  <b>Tuck - 记录硅基生命的每一次演进轨迹。</b><br/>
+  Research by Jasonmilk
 </p>
