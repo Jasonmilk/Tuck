@@ -4,9 +4,10 @@ Tuck Proxy – Dynamic model routing, secure authentication, and audit logging.
 This module provides an OpenAI-compatible gateway that:
   - Dynamically discovers available models from backend services.
   - Authenticates requests via Bearer token.
-  - Injects persona system prompts from local JSON files (with caching).
+  - Injects persona system prompts from local JSON files or remote Helix-Mind.
   - Audits all interactions to the Tuck kernel asynchronously (non-blocking).
   - Forwards requests with production-grade concurrency and error handling.
+  - Integrates modular security engine for prompt sanitization.
 """
 
 import asyncio
@@ -16,6 +17,7 @@ import logging
 import os
 import re
 import secrets
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -30,11 +32,11 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from tuck.kernel import TuckKernel
+from tuck.security.engine import security_engine  # 🔥 安全引擎
 
 # ----------------------------------------------------------------------
 # Configuration (Pydantic Settings)
 # ----------------------------------------------------------------------
-
 class Settings(BaseSettings):
     tuck_backends: str = Field("8016", env="TUCK_BACKENDS")
     tuck_api_key: str = Field("", env="TUCK_API_KEY")
@@ -48,6 +50,7 @@ class Settings(BaseSettings):
     tuck_probe_concurrency: int = Field(10, env="TUCK_PROBE_CONCURRENCY")
     tuck_persona_cache_size: int = Field(128, env="TUCK_PERSONA_CACHE_SIZE")
     tuck_max_request_size: int = Field(10 * 1024 * 1024, env="TUCK_MAX_REQUEST_SIZE")
+    helix_mind_url: str = Field("", env="HELIX_MIND_URL")   # 新增：人格服务地址
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
@@ -63,7 +66,7 @@ class Settings(BaseSettings):
 settings = Settings()
 
 # ----------------------------------------------------------------------
-# Logging & Request ID (Fixing the httpx KeyError Crash)
+# Logging & Request ID
 # ----------------------------------------------------------------------
 request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="-")
 
@@ -73,29 +76,24 @@ class RequestIDFilter(logging.Filter):
             record.request_id = request_id_var.get()
         return True
 
-# Setup format
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] request_id=%(request_id)s %(message)s",
 )
 logger = logging.getLogger("tuck.proxy")
 
-# 🔥 核心修复：必须把 Filter 挂载到所有的 handlers 上，防止 httpx 崩溃
 for handler in logging.getLogger().handlers:
     handler.addFilter(RequestIDFilter())
-# 顺便静音 httpx 的底层日志，提高性能
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # ----------------------------------------------------------------------
 # Kernel Instance
 # ----------------------------------------------------------------------
-# 初始化你刚刚替换的最新版防弹 Kernel
 kernel = TuckKernel("~/.tuck_vault")
 
 # ----------------------------------------------------------------------
-# Persona Cache (Original implementation)
+# Persona Cache (Local file cache)
 # ----------------------------------------------------------------------
-
 class PersonaCache:
     def __init__(self, maxsize: int = 128):
         self._cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
@@ -128,9 +126,47 @@ class PersonaCache:
 persona_cache = PersonaCache(maxsize=settings.tuck_persona_cache_size)
 
 # ----------------------------------------------------------------------
-# Dynamic Router (Original implementation)
+# Persona Client (Remote Helix-Mind)
 # ----------------------------------------------------------------------
+class PersonaClient:
+    """从 Helix-Mind 获取人格的客户端，带简单缓存"""
+    def __init__(self, base_url: str):
+        self.base_url = base_url.rstrip('/')
+        self.cache: Dict[str, Dict[str, Any]] = {}   # {name: {'ts': timestamp, 'data': data}}
 
+    async def get_persona(self, name: str) -> Dict[str, Any]:
+        now = time.time()
+        # 缓存 60 秒
+        cached = self.cache.get(name)
+        if cached and now - cached['ts'] < 60:
+            return cached['data']
+
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(f"{self.base_url}/v1/persona/{name}")
+                if resp.status_code == 200:
+                    data = resp.json()
+                    self.cache[name] = {'ts': now, 'data': data}
+                    return data
+                else:
+                    logger.warning(f"Helix-Mind 返回 {resp.status_code}，使用空人格")
+        except Exception as e:
+            logger.error(f"获取人格 {name} 失败: {e}")
+
+        # 返回空人格（不影响对话）
+        return {"system_prompt": "", "params": {}}
+
+# 根据配置决定是否启用远程人格
+if settings.helix_mind_url:
+    persona_client = PersonaClient(settings.helix_mind_url)
+    logger.info(f"Helix-Mind 人格服务已启用: {settings.helix_mind_url}")
+else:
+    persona_client = None
+    logger.info("未配置 HELIX_MIND_URL，将使用本地 personas 目录")
+
+# ----------------------------------------------------------------------
+# Dynamic Router
+# ----------------------------------------------------------------------
 class TuckRouter:
     def __init__(self, client: httpx.AsyncClient) -> None:
         self.client = client
@@ -161,7 +197,7 @@ class TuckRouter:
                     if resp.status_code == 200:
                         models = [m["id"] for m in resp.json().get("data",[])]
                         return url, models
-                except Exception as e:
+                except Exception:
                     pass
                 return None
 
@@ -214,7 +250,7 @@ async def lifespan(app: FastAPI):
     scan_task.cancel()
     await client.aclose()
 
-app = FastAPI(title="Tuck Proxy", version="2.0", lifespan=lifespan, docs_url=None, redoc_url=None)
+app = FastAPI(title="Tuck Proxy", version="2.1", lifespan=lifespan, docs_url=None, redoc_url=None)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 # ----------------------------------------------------------------------
@@ -222,7 +258,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, 
 # ----------------------------------------------------------------------
 @app.middleware("http")
 async def authentication(request: Request, call_next):
-    if request.method == "OPTIONS" or request.url.path in ["/health", "/ready"]:
+    if request.method == "OPTIONS" or request.url.path in["/health", "/ready"]:
         return await call_next(request)
 
     api_key = settings.tuck_api_key
@@ -289,25 +325,56 @@ async def chat_completions(request: Request):
     messages = body.get("messages",[])
     is_stream = body.get("stream", False)
 
-    # --- Persona Injection ---
+    # 🔥 安全脱敏
+    for msg in messages:
+        if isinstance(msg.get("content"), str):
+            msg["content"] = security_engine.process(msg["content"])
+
+    # --- Persona Injection (优先远程，回退本地) ---
     persona_name = request.headers.get("X-Tuck-Persona")
+    sys_prompt = None
+    params_override = {}
+
     if persona_name:
-        if not re.match(r"^[a-zA-Z0-9_\-]+$", persona_name): raise HTTPException(status_code=400, detail="Invalid persona name format")
-        personas_base = Path(settings.tuck_personas_dir)
-        if not personas_base.is_absolute(): personas_base = Path(__file__).parent / personas_base
-        persona_path = personas_base / f"{persona_name}.json"
+        if not re.match(r"^[a-zA-Z0-9_\-]+$", persona_name):
+            raise HTTPException(status_code=400, detail="Invalid persona name format")
 
-        persona_data = await persona_cache.get(persona_path)
-        if persona_data is None and persona_path.is_file():
-            async with aiofiles.open(persona_path, "r", encoding="utf-8") as f:
-                persona_data = json.loads(await f.read())
-            await persona_cache.set(persona_path, persona_data)
+        # 1. 尝试从远程 Helix-Mind 获取
+        if persona_client:
+            try:
+                persona_data = await persona_client.get_persona(persona_name)
+                sys_prompt = persona_data.get("system_prompt")
+                params_override = persona_data.get("params", {})
+                if sys_prompt:
+                    logger.info(f"从 Helix-Mind 获取人格 '{persona_name}' 成功")
+            except Exception as e:
+                logger.error(f"远程获取人格失败: {e}")
+                # 继续尝试本地（如果希望完全回退）
 
-        if persona_data:
-            sys_prompt = persona_data.get("system_prompt")
-            if sys_prompt and (not messages or messages[0].get("role") != "system"):
-                messages.insert(0, {"role": "system", "content": sys_prompt})
-            body.update(persona_data.get("params", {}))
+        # 2. 如果远程未获取到（或未配置远程），回退到本地 personas/ 目录
+        if sys_prompt is None:
+            personas_base = Path(settings.tuck_personas_dir)
+            if not personas_base.is_absolute():
+                personas_base = Path(__file__).parent / personas_base
+            persona_path = personas_base / f"{persona_name}.json"
+
+            persona_data = await persona_cache.get(persona_path)
+            if persona_data is None and persona_path.is_file():
+                async with aiofiles.open(persona_path, "r", encoding="utf-8") as f:
+                    persona_data = json.loads(await f.read())
+                await persona_cache.set(persona_path, persona_data)
+
+            if persona_data:
+                sys_prompt = persona_data.get("system_prompt")
+                params_override = persona_data.get("params", {})
+                logger.info(f"从本地文件获取人格 '{persona_name}'")
+
+        # 3. 注入 system prompt 和参数
+        if sys_prompt and (not messages or messages[0].get("role") != "system"):
+            messages.insert(0, {"role": "system", "content": sys_prompt})
+            logger.debug(f"已插入 system prompt: {sys_prompt[:100]}...")
+        if params_override:
+            body.update(params_override)
 
     # --- Prepare forwarding headers ---
     hop_by_hop = {"host", "content-length", "connection", "authorization", "proxy-connection", "keep-alive", "te", "trailer", "upgrade"}
@@ -319,7 +386,7 @@ async def chat_completions(request: Request):
     client: httpx.AsyncClient = request.app.state.client
     backend_req = client.build_request("POST", f"{backend_url}/v1/chat/completions", json=body, headers=headers)
 
-    # 🔥 核心改造：完美拦截并提取 AI 回复
+    # 🔥 拦截并提取 AI 回复，异步写入内核
     try:
         # 非流式处理
         if not is_stream:
@@ -329,8 +396,6 @@ async def chat_completions(request: Request):
                     ai_reply = resp.json()["choices"][0]["message"]["content"]
                     record_msgs = list(messages)
                     record_msgs.append({"role": "assistant", "content": ai_reply})
-                    
-                    # 异步提交到新版 kernel，防阻塞
                     asyncio.create_task(asyncio.to_thread(
                         kernel.sync_history, record_msgs, model, metadata={"request_id": current_req_id}
                     ))
@@ -340,7 +405,7 @@ async def chat_completions(request: Request):
 
         # 流式处理
         resp = await client.send(backend_req, stream=True)
-        
+
         async def stream_generator():
             full_reply = ""
             try:
@@ -351,7 +416,7 @@ async def chat_completions(request: Request):
                             if data_str.strip() != "[DONE]":
                                 try:
                                     payload = json.loads(data_str)
-                                    content = payload.get("choices",[{}])[0].get("delta", {}).get("content", "")
+                                    content = payload.get("choices", [{}])[0].get("delta", {}).get("content", "")
                                     full_reply += content
                                 except Exception:
                                     pass
@@ -360,11 +425,10 @@ async def chat_completions(request: Request):
                         yield "\n"
             finally:
                 await resp.aclose()
-                # 流结束或客户端意外断开时，只要拿到了回复，就保存下来！
                 if full_reply:
                     record_msgs = list(messages)
                     record_msgs.append({"role": "assistant", "content": full_reply})
-                    request_id_var.set(current_req_id) # 恢复上下文以便日志打印正常
+                    request_id_var.set(current_req_id)
                     try:
                         await asyncio.to_thread(
                             kernel.sync_history, record_msgs, model, metadata={"request_id": current_req_id}
