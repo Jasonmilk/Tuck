@@ -10,8 +10,10 @@
 //! - **物理事实优先**: Decisions based on PFP physical features (sensor-driven), not AI semantics.
 //! - **确定性优先**: Fixed offset, bit operations, match jump table, no branch, no heap allocation in hot path.
 
+mod logging;
+
 use clap::Parser;
-use tuck_core::{decide_from_bytes, SecurityPolicy};
+use tuck_core::{config::TuckConfig, decide_from_bytes, SecurityPolicy};
 
 /// Tuck — Helix ecosystem immune system (CI-144 PFP consumer, hard real-time security gate).
 #[derive(Parser, Debug)]
@@ -21,6 +23,10 @@ struct Cli {
     #[arg(short, long)]
     pfp: Option<String>,
 
+    /// Configuration file path (TOML).
+    #[arg(short, long)]
+    config: Option<String>,
+
     /// Show version and exit.
     #[arg(short, long)]
     version: bool,
@@ -28,17 +34,27 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize tracing (按需加载: only when binary runs, not when used as library)
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
-
     let cli = Cli::parse();
 
     if cli.version {
         println!("Tuck v{}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
+
+    // Load configuration (TOML file + environment variable overrides)
+    let config = TuckConfig::load(cli.config.as_deref())?;
+
+    // Initialize structured logging (按需加载: only when binary runs)
+    let _logging_guard = logging::init_logging(&config.log)?;
+
+    tracing::info!(
+        target: "tuck::startup",
+        version = env!("CARGO_PKG_VERSION"),
+        host = %config.server.host,
+        port = config.server.port,
+        fail_closed = config.security.fail_closed,
+        "Tuck starting up"
+    );
 
     // Default policy (按需驱动: policy loaded once, decide() called per-frame)
     let policy = SecurityPolicy::default();
@@ -47,6 +63,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Decode hex PFP bytes
         let bytes = hex::decode(&hex)?;
         let decision = decide_from_bytes(&bytes, &policy);
+
+        // Structured logging
+        tracing::info!(
+            target: "tuck::decision",
+            pfp = %hex.to_uppercase(),
+            decision = ?decision,
+            "PFP decision"
+        );
+
         println!("PFP: 0x{}", hex.to_uppercase());
         println!("Decision: {:?}", decision);
     } else {
@@ -56,8 +81,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Usage: tuck --pfp <hex-bytes>");
         println!("Example: tuck --pfp CF140800  (CRITICAL risk, normal override)");
         println!();
+        println!("Configuration:");
+        println!("  --config <path>  TOML configuration file");
+        println!("  Environment: TUCK_SERVER__PORT, TUCK_LOG__LEVEL, etc.");
+        println!();
         println!("Principles: 极致解耦 / 按需加载 / 按需驱动 / 极致复用 / 物理事实优先 / 确定性优先");
     }
 
+    tracing::info!(target: "tuck::shutdown", "Tuck shutting down");
     Ok(())
 }
