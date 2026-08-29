@@ -5,6 +5,31 @@
 
 ---
 
+### 2026-08-29 P3 凭证物理注入 ✅ 完成
+
+- **事件**：P3 凭证物理注入 — identity_label 映射 + 物理边缘注入 + 加密文件存储 + 零化验证 + HSM/TPM trait 预留
+- **关键决策**：
+  - identity_label 格式：`scheme:path`（env/file/hsm/vault/inline），组件间只流转 label，不流转明文凭证
+  - Credential 使用 `Zeroizing<Vec<u8>>`，drop 时自动清零内存
+  - 物理边缘注入：凭证仅在出网前注入，注入后立即 drop（触发 zeroize）
+  - FileCredentialStore 使用 AES-256-GCM 加密，主密钥从 `TUCK_MASTER_KEY` 环境变量读取（base64 32字节）
+  - HSM/TPM 支持定义为 trait（不实现），生产环境可替换 FileCredentialStore
+  - `#![forbid(unsafe_code)]`：零化验证使用安全的 `zeroize()` 方法直接测试，不使用 unsafe
+- **代码实现**：
+  - `credential.rs`：Credential（Zeroizing）+ IdentityLabel + CredentialScheme + CredentialStore trait + InMemoryCredentialStore
+  - `injection.rs`：InjectionEngine + InjectionTarget（HttpHeader/BearerToken/QueryParam/BodyField/BasicAuth）+ OutboundRequest
+  - `file_store.rs`：FileCredentialStore + MasterKey + AES-256-GCM 加密/解密 + 原子写入（tmp + rename）
+  - `hsm.rs`：HsmCredentialStore trait + TpmCredentialStore trait + KeyAlgorithm + EcCurve + PcrPolicy + AttestationQuote
+- **测试结果**：123 个测试全部通过（28 PFP + 10 SAP + 9 policy + 9 hitl + 9 catastrophic + 9 hot_reload + 22 credential + 17 injection + 13 file_store + 10 hsm），0 failure
+- **核心承诺**：
+  - 承诺 1（亚微秒决策）：✅ P1 验证，P3 凭证注入不影响硬实时路径
+  - 承诺 2（fail-closed）：✅ P1 验证 + P2 HITL 超时自动 Reject
+  - 承诺 3（凭证永不在组件内存中）：✅ P3 实现（identity_label 流转 + 物理边缘注入 + Zeroizing 自动清零）
+  - 承诺 4（审计）：🚧 部分（HITL/CATASTROPHIC/重载历史）→ P4 完整审计
+- **六大工程原则**：全部体现（极致解耦：CredentialStore trait 可插拔后端 / 按需加载：凭证仅在 get() 时加载 / 按需驱动：注入仅在出网时触发 / 极致复用：AES-GCM/ed25519/zeroize 生态复用 / 物理事实优先：主密钥从环境变量读取，HSM trait 预留 / 确定性优先：固定加密算法 + 原子写入）
+- **健康度**：123 tests + 10 模块（pfp/sap/policy/hitl/catastrophic/hot_reload/credential/injection/file_store/hsm）
+- **版本**：v0.4.0（P3 完成）
+
 ### 2026-08-29 P2 策略引擎 ✅ 完成
 
 - **事件**：P2 策略引擎 — 策略配置文件 + HITL 执行闸 + CATASTROPHIC 硬覆盖 + 策略热加载

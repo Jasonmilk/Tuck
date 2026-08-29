@@ -56,13 +56,17 @@ crates/
 ## 测试覆盖率
 
 ```
-64 tests passed, 0 failed, 0 warning
+123 tests passed, 0 failed, 0 warning
 ├── 28 PFP/决策测试（含 ≥12 故障注入类别，100% Reject）
 ├── 10 SAP 可选增强测试（重放检测、版本验证、缓存隔离）
 ├── 9 策略配置测试（TOML 加载/保存/版本验证/自定义策略）
 ├── 9 HITL 执行闸测试（确认/拒绝/超时 fail-closed/历史记录）
 ├── 9 CATASTROPHIC 硬覆盖测试（紧急信号/广播通知/优先级/审计）
-└── 9 策略热加载测试（文件监控/原子交换/版本管理/重载历史）
+├── 9 策略热加载测试（文件监控/原子交换/版本管理/重载历史）
+├── 22 凭证管理测试（identity_label/Credential/Zeroizing/CredentialStore）
+├── 17 物理边缘注入测试（HttpHeader/Bearer/QueryParam/BodyField/BasicAuth）
+├── 13 加密文件存储测试（AES-256-GCM/主密钥/原子写入/错误密钥拒绝）
+└── 10 HSM/TPM trait 测试（trait 对象安全/KeyAlgorithm/PcrPolicy/AttestationQuote）
 ```
 
 运行测试：`cargo test --workspace`
@@ -77,6 +81,10 @@ crates/
 | `hitl` | HITL 执行闸（NeedHumanConfirm → 确认/超时 Reject） | ✅ |
 | `catastrophic` | CATASTROPHIC 硬覆盖（紧急信号 + 并行人类通知） | ✅ |
 | `hot_reload` | 策略热加载（文件监控 + 原子交换 + 重载历史） | ✅ |
+| `credential` | 凭证管理（identity_label + Credential + Zeroizing + CredentialStore trait） | ✅ |
+| `injection` | 物理边缘注入（出网前注入 + 注入后 zeroize） | ✅ |
+| `file_store` | 加密文件存储（AES-256-GCM + MasterKey + 原子写入） | ✅ |
+| `hsm` | HSM/TPM trait 预留（HsmCredentialStore + TpmCredentialStore） | ✅ |
 
 ## 快速开始
 

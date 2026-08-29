@@ -22,6 +22,10 @@ pub mod policy;
 pub mod hitl;
 pub mod catastrophic;
 pub mod hot_reload;
+pub mod credential;
+pub mod injection;
+pub mod file_store;
+pub mod hsm;
 
 // ============================================================================
 // PFP Header (4 bytes / 32 bits)
