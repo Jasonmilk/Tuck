@@ -40,6 +40,29 @@ crates/
 └── tuck/           # 二进制入口：CLI、配置、组装
 ```
 
+## 性能基准（criterion, 1000 samples）
+
+| 基准 | p50 | p99 | 吞吐量 | 目标 |
+|---|---|---|---|---|
+| `decide_from_bytes` CRITICAL | 314.73 ps | **322.89 ps** | 3.10 Gelem/s | < 1μs ✅ (3097x faster) |
+| `decide_from_bytes` invalid_magic | 298.72 ps | 299.75 ps | 3.34 Gelem/s | < 1μs ✅ |
+| PFP `risk_level()` 提取 | 298.78 ps | 299.57 ps | 3.35 Gelem/s | - |
+| PFP `effective_risk_level()` | 305.68 ps | 317.91 ps | 3.27 Gelem/s | - |
+
+**硬实时决策延迟：p99 = 0.32 ns，远超 <1μs 目标（快 3097 倍）。**
+
+运行基准：`cargo bench -p tuck-core`
+
+## 测试覆盖率
+
+```
+28 tests passed, 0 failed, 0 warning
+├── 18 PFP/决策测试（含 ≥12 故障注入类别，100% Reject）
+└── 10 SAP 可选增强测试（重放检测、版本验证、缓存隔离）
+```
+
+运行测试：`cargo test --workspace`
+
 ## 快速开始
 
 ```bash

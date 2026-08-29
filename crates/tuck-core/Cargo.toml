@@ -11,3 +11,7 @@ zeroize.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+
+[[bench]]
+name = "decide_benchmark"
+harness = false
