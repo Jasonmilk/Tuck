@@ -1,0 +1,47 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/tuck-core",
+    "crates/tuck",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/Jasonmilk/Tuck"
+description = "Tuck: Helix ecosystem immune system — CI-144 PFP consumer, hard real-time security gate"
+
+[workspace.dependencies]
+# CI-144 BIND-19 reference implementation (PFP 4-byte type)
+# TODO: publish to crates.io or use git dependency
+# bind19 = { git = "https://github.com/CommonIntents/BIND-19", branch = "v2.0-alpha" }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Error handling
+thiserror = "1"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Zeroize for credential memory zeroing
+zeroize = { version = "1", features = ["derive"] }
+
+# SHA-256 for audit chain
+sha2 = "0.10"
+
+# Testing
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

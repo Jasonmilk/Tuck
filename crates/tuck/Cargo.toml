@@ -1,0 +1,21 @@
+[package]
+name = "tuck"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Tuck: Helix ecosystem immune system — CI-144 PFP consumer, hard real-time security gate"
+
+[[bin]]
+name = "tuck"
+path = "src/main.rs"
+
+[dependencies]
+tuck-core = { path = "../tuck-core" }
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+clap = { version = "4", features = ["derive"] }
+hex = "0.4"

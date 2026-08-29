@@ -1,0 +1,13 @@
+[package]
+name = "tuck-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Tuck hard real-time core — PFP 4-byte reader, decide() function, fail-closed decision engine"
+
+[dependencies]
+thiserror.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
