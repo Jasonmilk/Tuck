@@ -37,6 +37,7 @@ pub mod mind_bridge;
 pub mod anaphase_bridge;
 pub mod tentacle_bridge;
 pub mod config;
+pub mod metrics;
 
 // ============================================================================
 // PFP Header (4 bytes / 32 bits)
