@@ -1,60 +1,59 @@
 # Tuck 开发导航牌（PLAN）
 
-> **版本**：v0.6.0（P5 传输层集成，2026-08-29）
-> **状态**：🚧 P5 — 传输层集成（进行中）
-> **上一阶段**：P4 — 全息审计 ✅ 已完成（见 GROWTH.md，173 tests，SHA-256 链式日志 + WORM 存储 + 查询 API + 篡改检测）
+> **版本**：v0.7.0（P6 生态联调，2026-08-29）
+> **状态**：🚧 P6 — 生态联调（规划中）
+> **上一阶段**：P5 — 传输层集成 ✅ 已完成（见 GROWTH.md，212 tests，帧解析+HTTP拦截+凭证注入+性能压测）
 > **分支**：rs
 > **所属方法论**：phyt-DNA v1.0（PLAN 动态流转闭环，方法论锚点项目 https://github.com/Jasonmilk/phyt-DNA）
 > **规则**：本文件只含当前阶段 + 下一阶段预览 + 阶段总览地图。完成阶段 → GROWTH.md。总行数 ≤150，超出触发历史迁移。
 
 ---
 
-## 1. 当前阶段：P5 — 传输层集成
+## 1. 当前阶段：P6 — 生态联调
 
-> **状态**：🚧 进行中。
-> **前置依赖**：P4 全息审计 ✅（173 tests，4 条核心承诺全部实现）。
-> **目标**：CI-144 帧代理/中间件、HTTP/gRPC 接入、出网凭证注入集成、性能压测。
+> **状态**：⏳ 规划中。P5 已完成，等待用户确认进入 P6。
+> **前置依赖**：P5 传输层集成 ✅（212 tests，帧解析+HTTP拦截+凭证注入+性能压测）。
+> **目标**：与 Anaphase/Tentacle/Cellrix 端到端联调，验证 Tuck 在 Helix 生态中的完整角色。
 
 ### 1.1 目标
 
 | 任务 | 内容 | 入口 | 状态 |
 |---|---|---|---|
-| T1 | CI-144 帧解析器（BIND-19 帧 + PFP 4 字节提取） | bytes + 零拷贝 | ⏳ |
-| T2 | HTTP 代理中间件（axum layer，请求拦截 + PFP 决策） | axum + tower | ⏳ |
-| T3 | 出网凭证注入集成（与 P3 物理边缘注入对接） | injection + CredentialStore | ⏳ |
-| T4 | 性能压测（高并发决策延迟 + 审计写入吞吐量） | criterion + 压测脚本 | ⏳ |
+| T1 | 与 Anaphase 联调（Anaphase 调用 Tentacle，Tuck 拦截凭证注入） | 集成测试 | ⏳ |
+| T2 | 与 Tentacle 联调（Tentacle 工具执行经过 Tuck 安全闸门） | 集成测试 | ⏳ |
+| T3 | 与 Cellrix 联调（Tuck 决策状态在 Cellrix 中展示） | 状态流 | ⏳ |
+| T4 | 与 CI-144 v2.0 PAL 对接（Tuck 消费 PAL 特征做硬实时决策） | 协议对接 | ⏳ |
 
 ### 1.2 核心承诺状态
 
 | 承诺 | 状态 | 落地阶段 |
 |---|---|---|
 | 1 只读 4 字节，亚微秒级决策 | ✅ P1 验证（p99=322.89ps） | P1 |
-| 2 fail-closed，永不放行未知 | ✅ P1 验证 + P2 HITL 超时自动 Reject | P1/P2 |
-| 3 凭证永不在组件内存中 | ✅ P3 实现（identity_label + 物理边缘注入 + Zeroizing） | P3 |
-| 4 每一次决策都不可篡改地记录 | ✅ P4 实现（SHA-256 链式日志 + WORM 存储 + 篡改检测） | P4 |
+| 2 fail-closed，永不放行未知 | ✅ P1 验证 + P2 HITL + P5 拦截器 | P1/P2/P5 |
+| 3 凭证永不在组件内存中 | ✅ P3 实现 + P5 注入后 zeroize | P3/P5 |
+| 4 每一次决策都不可篡改地记录 | ✅ P4 实现（SHA-256 链式日志 + WORM） | P4 |
 
 ### 1.3 入口 ADR
 
 - **ADR-0001**：Tuck Rust 重构 + 思想重新对齐（Active）
 - **ADR-0002**：PFP 依赖策略 — 保留本地零拷贝实现（Active）
-- **P5 新增 ADR 候选**：HTTP 代理架构选择、帧解析零拷贝策略、压测基准
+- **P6 新增 ADR 候选**：生态联调架构、CI-144 v2.0 对接策略
 
 ### 1.4 验收标准
 
-- T1：CI-144 帧解析器可正确提取 PFP 4 字节，零拷贝，支持 v1/v2 帧
-- T2：HTTP 代理中间件可拦截请求、提取 PFP、执行 decide()、Pass/Reject
-- T3：出网请求自动注入凭证（identity_label → 明文凭证 → 注入 → zeroize）
-- T4：压测报告（p50/p99/p999 决策延迟 + 审计写入吞吐量 + 内存占用）
-- `cargo test --workspace` 全绿 + 0 warning
-- 端到端测试：HTTP 请求 → Tuck 拦截 → PFP 决策 → 凭证注入 → 出网
+- T1：Anaphase → Tentacle 调用链中，Tuck 正确拦截并注入凭证
+- T2：Tentacle 工具执行经过 Tuck 安全闸门，Reject 时工具不执行
+- T3：Tuck 决策状态（Pass/Reject/HITL/CATASTROPHIC）在 Cellrix 中实时展示
+- T4：Tuck 消费 CI-144 v2.0 PAL 特征（24 字节），向后兼容 v1.0
+- 端到端演示：Helix-Mind 思考 → Anaphase 编排 → Tentacle 执行 → Tuck 安全 → Cellrix 展示
 
-### 1.5 下一阶段预览：P6 — 生态联调
+### 1.5 下一阶段预览：P7 — 生产就绪
 
-- 与 Anaphase 端到端联调（Anaphase 调用 Tentacle，Tuck 拦截凭证注入）
-- 与 Tentacle 联调（Tentacle 工具执行经过 Tuck 安全闸门）
-- 与 Cellrix 联调（Tuck 决策状态在 Cellrix 中展示）
-- 与 CI-144 v2.0 PAL 对接（Tuck 消费 PAL 特征做硬实时决策）
-- 完整生态演示：Helix-Mind 思考 → Anaphase 编排 → Tentacle 执行 → Tuck 安全 → Cellrix 展示
+- 配置文件完善（TOML 策略 + 环境变量 + 命令行参数）
+- 日志系统（结构化日志 + 日志轮转 + 日志级别）
+- 监控指标（Prometheus metrics + 健康检查端点）
+- 部署文档（Docker + systemd + Kubernetes）
+- 安全审计（第三方审计 + 渗透测试）
 
 ---
 
@@ -67,8 +66,9 @@
 | P2 | 策略引擎（策略配置 + HITL 执行闸 + CATASTROPHIC 硬覆盖 + 热加载） | ✅ 已完成 |
 | P3 | 凭证物理注入（identity_label → 明文凭证 + zeroize + HSM/TPM） | ✅ 已完成 |
 | P4 | 全息审计（SHA-256 链式日志 + WORM 存储 + 查询 API + 篡改检测） | ✅ 已完成 |
-| **P5** | **传输层集成（CI-144 帧代理 + HTTP/gRPC 接入 + 凭证注入集成）** | **🚧 进行中** |
-| P6 | 生态联调（与 Anaphase/Tentacle/Cellrix 端到端联调） | ⏳ 规划 |
+| P5 | 传输层集成（CI-144 帧解析 + HTTP 拦截 + 凭证注入 + 性能压测） | ✅ 已完成 |
+| **P6** | **生态联调（与 Anaphase/Tentacle/Cellrix/CI-144 v2.0 端到端联调）** | **⏳ 规划中** |
+| P7 | 生产就绪（配置/日志/监控/部署/安全审计） | ⏳ 规划 |
 
 ---
 

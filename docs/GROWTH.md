@@ -5,6 +5,30 @@
 
 ---
 
+### 2026-08-29 P5 传输层集成 ✅ 完成
+
+- **事件**：P5 传输层集成 — CI-144 帧解析器 + HTTP 拦截器 + 出网凭证注入集成 + 性能压测
+- **关键决策**：
+  - 帧解析器零拷贝：Frame 持有原始缓冲区引用，无堆分配，PFP 提取是简单的 4 字节切片
+  - HTTP 拦截器框架无关：操作通用 header map，不硬依赖 axum/actix，可轻松适配任何 Web 框架
+  - 出网处理器组合模式：OutboundHandler 组合 HttpInterceptor + InjectionEngine，两者互不感知
+  - 凭证注入按需驱动：仅当决策为 Allow/HardOverride 时才解析 identity_label 并注入凭证，Rejected 请求永不触碰凭证存储
+  - 性能压测覆盖全链路：帧解析、HTTP 拦截、凭证注入、审计写入、完整流水线
+- **代码实现**：
+  - `frame.rs`：CI-144 帧解析器（FrameHeader + Frame + FrameBuilder，零拷贝，16 tests）
+  - `proxy.rs`：HTTP 拦截器（HttpInterceptor + InterceptResult + base64 编解码，14 tests）
+  - `outbound.rs`：出网处理器（OutboundHandler + OutboundResult + OutboundDecision，9 tests）
+  - `benches/integration_benchmark.rs`：集成性能基准测试（5 组基准：帧解析/HTTP 拦截/凭证注入/审计吞吐量/完整流水线）
+- **测试结果**：212 个测试全部通过（173 P0-P4 + 16 frame + 14 proxy + 9 outbound），0 failure
+- **核心承诺**：
+  - 承诺 1（亚微秒决策）：✅ P1 验证，P5 帧解析+拦截全链路仍亚微秒
+  - 承诺 2（fail-closed）：✅ P1 验证 + P2 HITL + P5 拦截器缺失 PFP 直接拒绝
+  - 承诺 3（凭证永不在组件内存中）：✅ P3 实现 + P5 注入后立即 zeroize
+  - 承诺 4（每一次决策都不可篡改地记录）：✅ P4 实现
+- **六大工程原则**：全部体现（极致解耦：帧/拦截/注入/审计独立模块 / 按需加载：PFP 提取是切片，无预计算 / 按需驱动：凭证注入仅在 Allow 时触发 / 极致复用：base64/SHA-256/serde 生态复用 / 物理事实优先：PFP 从请求头提取，Tuck 不发明 / 确定性优先：固定偏移帧结构 + 固定决策路径）
+- **健康度**：212 tests + 18 模块 + 2 组基准测试
+- **版本**：v0.6.0（P5 完成）
+
 ### 2026-08-29 P4 全息审计 ✅ 完成
 
 - **事件**：P4 全息审计 — SHA-256 链式审计日志 + WORM 追加写存储 + 查询 API + 篡改检测 + 历史整合

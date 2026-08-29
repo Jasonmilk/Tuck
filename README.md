@@ -56,7 +56,7 @@ crates/
 ## 测试覆盖率
 
 ```
-173 tests passed, 0 failed, 0 warning
+212 tests passed, 0 failed, 0 warning
 ├── 28 PFP/决策测试（含 ≥12 故障注入类别，100% Reject）
 ├── 10 SAP 可选增强测试（重放检测、版本验证、缓存隔离）
 ├── 9 策略配置测试（TOML 加载/保存/版本验证/自定义策略）
@@ -70,10 +70,14 @@ crates/
 ├── 14 审计日志测试（SHA-256 链式结构/verify_chain/篡改检测/容量限制）
 ├── 9 WORM 存储测试（追加写/崩溃恢复/篡改文件检测/统计信息）
 ├── 14 审计查询测试（多维度筛选/分页/排序/组合过滤/序列化）
-└── 16 篡改检测测试（5种篡改类型/TamperReport/历史整合/端到端链验证）
+├── 16 篡改检测测试（5种篡改类型/TamperReport/历史整合/端到端链验证）
+├── 16 帧解析测试（FrameHeader/Frame/FrameBuilder/零拷贝/向后兼容）
+├── 14 HTTP 拦截测试（PFP 头提取/decide/Allow/Reject/HITL/HardOverride/错误处理）
+└── 9 出网处理测试（Allow+注入/Reject无注入/HardOverride/缺失头/凭证未找到）
 ```
 
 运行测试：`cargo test --workspace`
+运行基准：`cargo bench -p tuck-core`
 
 ## 核心模块
 
@@ -93,6 +97,9 @@ crates/
 | `audit_store` | WORM 存储（追加写文件 + 崩溃恢复 + 篡改检测） | ✅ |
 | `audit_query` | 审计查询 API（多维度筛选 + 分页 + 排序 + Queryable trait） | ✅ |
 | `tamper` | 篡改检测（TamperReport + 5种篡改类型 + 历史整合转换） | ✅ |
+| `frame` | CI-144 帧解析器（零拷贝 Frame/FrameHeader/FrameBuilder） | ✅ |
+| `proxy` | HTTP 拦截器（PFP 头提取 + decide + InterceptResult） | ✅ |
+| `outbound` | 出网处理器（拦截+凭证注入集成 + OutboundHandler） | ✅ |
 
 ## 快速开始
 

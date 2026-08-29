@@ -30,6 +30,9 @@ pub mod audit;
 pub mod audit_store;
 pub mod audit_query;
 pub mod tamper;
+pub mod frame;
+pub mod proxy;
+pub mod outbound;
 
 // ============================================================================
 // PFP Header (4 bytes / 32 bits)
