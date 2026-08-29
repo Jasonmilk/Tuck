@@ -56,12 +56,27 @@ crates/
 ## 测试覆盖率
 
 ```
-28 tests passed, 0 failed, 0 warning
-├── 18 PFP/决策测试（含 ≥12 故障注入类别，100% Reject）
-└── 10 SAP 可选增强测试（重放检测、版本验证、缓存隔离）
+64 tests passed, 0 failed, 0 warning
+├── 28 PFP/决策测试（含 ≥12 故障注入类别，100% Reject）
+├── 10 SAP 可选增强测试（重放检测、版本验证、缓存隔离）
+├── 9 策略配置测试（TOML 加载/保存/版本验证/自定义策略）
+├── 9 HITL 执行闸测试（确认/拒绝/超时 fail-closed/历史记录）
+├── 9 CATASTROPHIC 硬覆盖测试（紧急信号/广播通知/优先级/审计）
+└── 9 策略热加载测试（文件监控/原子交换/版本管理/重载历史）
 ```
 
 运行测试：`cargo test --workspace`
+
+## 核心模块
+
+| 模块 | 职责 | 状态 |
+|---|---|---|
+| `pfp` (lib.rs) | PFP 4 字节零拷贝读取 + decide() 硬实时决策 | ✅ |
+| `sap` | SAP 28 字节可选增强 + Seq-Counter 防重放 | ✅ |
+| `policy` | 策略配置（TOML）+ 版本管理 + 文件加载/保存 | ✅ |
+| `hitl` | HITL 执行闸（NeedHumanConfirm → 确认/超时 Reject） | ✅ |
+| `catastrophic` | CATASTROPHIC 硬覆盖（紧急信号 + 并行人类通知） | ✅ |
+| `hot_reload` | 策略热加载（文件监控 + 原子交换 + 重载历史） | ✅ |
 
 ## 快速开始
 

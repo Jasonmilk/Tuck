@@ -18,6 +18,10 @@
 #![warn(missing_docs, missing_debug_implementations)]
 
 pub mod sap;
+pub mod policy;
+pub mod hitl;
+pub mod catastrophic;
+pub mod hot_reload;
 
 // ============================================================================
 // PFP Header (4 bytes / 32 bits)

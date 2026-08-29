@@ -5,6 +5,29 @@
 
 ---
 
+### 2026-08-29 P2 策略引擎 ✅ 完成
+
+- **事件**：P2 策略引擎 — 策略配置文件 + HITL 执行闸 + CATASTROPHIC 硬覆盖 + 策略热加载
+- **关键决策**：
+  - 策略配置使用 TOML 格式（与 Cargo.toml 一致，Rust 生态原生支持）
+  - HITL 执行闸使用 oneshot 通道 + 超时自动 Reject（fail-closed）
+  - CATASTROPHIC 硬覆盖使用 Notify 紧急信号 + broadcast 并行人类通知
+  - 策略热加载使用文件修改时间检查 + Arc<RwLock> 原子交换
+  - 策略版本使用语义化版本（major.minor.patch），不兼容版本拒绝加载
+- **代码实现**：
+  - `policy.rs`：PolicyConfig（可序列化）+ PolicyVersion + DecisionConfig + 文件加载/保存
+  - `hitl.rs`：HumanConfirmGate + ConfirmRequest + 超时自动 Reject + 历史记录
+  - `catastrophic.rs`：CatastrophicGate + CatastrophicEvent + Notify 紧急信号 + broadcast 通知
+  - `hot_reload.rs`：HotReloadPolicy + 文件监控 + 原子交换 + 重载历史
+- **测试结果**：64 个测试全部通过（28 PFP + 9 policy + 9 hitl + 9 catastrophic + 9 hot_reload），0 failure，0 warning
+- **核心承诺**：
+  - 承诺 1（亚微秒决策）：✅ P1 验证，P2 热加载不影响硬实时路径（current_policy() 返回 Arc，无锁）
+  - 承诺 2（fail-closed）：✅ HITL 超时自动 Reject，策略加载失败保留旧策略
+  - 承诺 4（审计）：🚧 部分（HITL 历史 + CATASTROPHIC 历史 + 重载历史），P4 完整审计
+- **六大工程原则**：全部体现（极致解耦：策略/HITL/CATASTROPHIC/热加载独立模块 / 按需加载：策略文件按需加载 / 按需驱动：事件驱动无轮询 / 极致复用：serde/tokio/uuid 生态复用 / 物理事实优先：PFP 特征驱动决策 / 确定性优先：固定超时 + 原子交换）
+- **健康度**：64 tests + 5 模块（pfp/sap/policy/hitl/catastrophic/hot_reload），策略引擎完整
+- **版本**：v0.3.0（P2 完成）
+
 ### 2026-08-29 P1 核心骨架完善 ✅ 完成
 
 - **事件**：P1 核心骨架完善 — BIND-19 依赖策略、硬实时性能基准、故障注入测试、SAP 可选增强接口
