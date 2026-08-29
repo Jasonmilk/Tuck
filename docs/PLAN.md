@@ -1,7 +1,7 @@
 # Tuck 开发导航牌（PLAN）
 
-> **版本**：v0.7.0（P6 生态联调，2026-08-29）
-> **状态**：🚧 P6 — 生态联调（规划中）
+> **版本**：v0.7.0（P6 生态联调，2026-08-30）
+> **状态**：🚧 P6 — 生态联调（进行中）
 > **上一阶段**：P5 — 传输层集成 ✅ 已完成（见 GROWTH.md，212 tests，帧解析+HTTP拦截+凭证注入+性能压测）
 > **分支**：rs
 > **所属方法论**：phyt-DNA v1.0（PLAN 动态流转闭环，方法论锚点项目 https://github.com/Jasonmilk/phyt-DNA）
@@ -11,20 +11,38 @@
 
 ## 1. 当前阶段：P6 — 生态联调
 
-> **状态**：⏳ 规划中。P5 已完成，等待用户确认进入 P6。
+> **状态**：🚧 进行中。P5 已完成，进入 P6-T1。
 > **前置依赖**：P5 传输层集成 ✅（212 tests，帧解析+HTTP拦截+凭证注入+性能压测）。
-> **目标**：与 Anaphase/Tentacle/Cellrix 端到端联调，验证 Tuck 在 Helix 生态中的完整角色。
+> **目标**：自底向上完成 Helix 生态联调——协议层 → 灵魂层 → 编排层 → 执行层 → 展示层。
 
-### 1.1 目标
+### 1.1 优先级与任务
 
-| 任务 | 内容 | 入口 | 状态 |
-|---|---|---|---|
-| T1 | 与 Anaphase 联调（Anaphase 调用 Tentacle，Tuck 拦截凭证注入） | 集成测试 | ⏳ |
-| T2 | 与 Tentacle 联调（Tentacle 工具执行经过 Tuck 安全闸门） | 集成测试 | ⏳ |
-| T3 | 与 Cellrix 联调（Tuck 决策状态在 Cellrix 中展示） | 状态流 | ⏳ |
-| T4 | 与 CI-144 v2.0 PAL 对接（Tuck 消费 PAL 特征做硬实时决策） | 协议对接 | ⏳ |
+| 优先级 | 任务 | 内容 | 入口 | 状态 |
+|---|---|---|---|---|
+| **P6-T1** | CI-144 协议家族对接 | PFP 4 字节已就绪，补全 SAP 防重放缓存 + 签名验证 + 规则6降级 | sap.rs | 🚧 |
+| **P6-T2** | Helix-Mind 联调 | 安全决策反馈 + 审计日志消费 + 认知工艺安全约束 | 集成测试 | ⏳ |
+| **P6-T3** | Anaphase 联调 | Anaphase 编排调用 Tentacle 时经过 Tuck 闸门 + 凭证注入 | 集成测试 | ⏳ |
+| **P6-T4** | Tentacle 联调 | Tentacle 工具执行经过 Tuck 安全闸门，Reject 时工具不执行 | 集成测试 | ⏳ |
+| **P6-T5** | Cellrix 联调 | Tuck 决策状态在 Cellrix 实时展示（Pass/Reject/HITL/CATASTROPHIC） | 状态流 | ⏳ |
 
-### 1.2 核心承诺状态
+**优先级理由**：协议层 → 灵魂层 → 编排层 → 执行层 → 展示层，自底向上，每一层稳定后再联调上一层。
+
+### 1.2 P6-T1 详细范围（CI-144 协议家族对接）
+
+> **注意**：CI-144 v2.0 已升级为协议家族方案，不是 24 字节 PAL。
+> - **PFP-xCF14**（4 字节，冻结层）— Tuck 已实现，硬实时决策只读这 4 字节
+> - **SAP-xCF14**（28 字节，演进层）— 防重放/签名验证，可选增强
+
+| 子任务 | 内容 | 状态 |
+|---|---|---|
+| T1.1 | SAP 帧解析（28 字节：Seq-Counter + PAH-Hash + PAH-Signature + 版本） | ⏳ |
+| T1.2 | Seq-Counter 防重放缓存（按 source_id 分片，LRU，≥1024 源） | ⏳ |
+| T1.3 | PAH-Signature 验证（64-bit 截断，软件阶段 ed25519，spawn_blocking） | ⏳ |
+| T1.4 | 规则 6：Replay-Enable=0 时强制降级到 MEDIUM + 强制签名验证 | ⏳ |
+| T1.5 | SAP 可选集成：decide_with_sap() — 无 SAP 按 PFP 决策，有 SAP 增强验证 | ⏳ |
+| T1.6 | 与 frame.rs 集成：Frame 解析时自动提取 SAP（如果 SAP-Present=1） | ⏳ |
+
+### 1.3 核心承诺状态
 
 | 承诺 | 状态 | 落地阶段 |
 |---|---|---|
@@ -33,21 +51,22 @@
 | 3 凭证永不在组件内存中 | ✅ P3 实现 + P5 注入后 zeroize | P3/P5 |
 | 4 每一次决策都不可篡改地记录 | ✅ P4 实现（SHA-256 链式日志 + WORM） | P4 |
 
-### 1.3 入口 ADR
+### 1.4 入口 ADR
 
 - **ADR-0001**：Tuck Rust 重构 + 思想重新对齐（Active）
 - **ADR-0002**：PFP 依赖策略 — 保留本地零拷贝实现（Active）
-- **P6 新增 ADR 候选**：生态联调架构、CI-144 v2.0 对接策略
+- **P6 新增 ADR 候选**：SAP 防重放缓存策略、PAH 签名验证降级模式、Helix-Mind 安全反馈通道
 
-### 1.4 验收标准
+### 1.5 验收标准
 
-- T1：Anaphase → Tentacle 调用链中，Tuck 正确拦截并注入凭证
-- T2：Tentacle 工具执行经过 Tuck 安全闸门，Reject 时工具不执行
-- T3：Tuck 决策状态（Pass/Reject/HITL/CATASTROPHIC）在 Cellrix 中实时展示
-- T4：Tuck 消费 CI-144 v2.0 PAL 特征（24 字节），向后兼容 v1.0
+- T1：SAP 28 字节解析正确，防重放缓存命中/未命中正确，签名验证通过/失败正确，规则6降级正确
+- T2：Helix-Mind 可接收 Tuck 安全决策反馈，可查询审计日志，认知工艺涉及物理动作时携带 PFP 风险标签
+- T3：Anaphase → Tentacle 调用链中，Tuck 正确拦截并注入凭证
+- T4：Tentacle 工具执行经过 Tuck 安全闸门，Reject 时工具不执行
+- T5：Tuck 决策状态在 Cellrix 中实时展示
 - 端到端演示：Helix-Mind 思考 → Anaphase 编排 → Tentacle 执行 → Tuck 安全 → Cellrix 展示
 
-### 1.5 下一阶段预览：P7 — 生产就绪
+### 1.6 下一阶段预览：P7 — 生产就绪
 
 - 配置文件完善（TOML 策略 + 环境变量 + 命令行参数）
 - 日志系统（结构化日志 + 日志轮转 + 日志级别）
@@ -67,7 +86,7 @@
 | P3 | 凭证物理注入（identity_label → 明文凭证 + zeroize + HSM/TPM） | ✅ 已完成 |
 | P4 | 全息审计（SHA-256 链式日志 + WORM 存储 + 查询 API + 篡改检测） | ✅ 已完成 |
 | P5 | 传输层集成（CI-144 帧解析 + HTTP 拦截 + 凭证注入 + 性能压测） | ✅ 已完成 |
-| **P6** | **生态联调（与 Anaphase/Tentacle/Cellrix/CI-144 v2.0 端到端联调）** | **⏳ 规划中** |
+| **P6** | **生态联调（协议家族+Helix-Mind+Anaphase+Tentacle+Cellrix，自底向上）** | **🚧 进行中** |
 | P7 | 生产就绪（配置/日志/监控/部署/安全审计） | ⏳ 规划 |
 
 ---
@@ -78,3 +97,4 @@
 |---|---|
 | 核心承诺 | VISION.md 第四节（4 条承诺） |
 | 特有铁律 | DNA.md 第五节（5 条：PFP 只读/fail-closed/凭证/审计/无分配） |
+| CI-144 协议家族 | PFP-xCF14（4字节冻结）+ SAP-xCF14（28字节演进），非 24 字节 PAL |
