@@ -1,0 +1,87 @@
+# Tuck Configuration Example
+# Copy to config.toml and modify as needed.
+
+[server]
+# Listen host (default: "127.0.0.1")
+host = "127.0.0.1"
+# Listen port (default: 8443)
+port = 8443
+# Maximum concurrent connections (default: 1024)
+max_connections = 1024
+# Request timeout in milliseconds (default: 5000)
+request_timeout_ms = 5000
+# Graceful shutdown timeout in seconds (default: 30)
+shutdown_timeout_s = 30
+
+[security]
+# Fail-closed mode: reject on any error (default: true)
+fail_closed = true
+# Default risk level for requests without PFP (default: "Medium")
+# Valid values: "Low", "Medium", "Critical", "Catastrophic"
+default_risk_level = "Medium"
+# Require PFP header for all requests (default: false)
+require_pfp = false
+# Require SAP header for high-risk requests (default: false)
+require_sap_for_high_risk = false
+# Maximum audit entries before rotation (default: 100000)
+max_audit_entries = 100000
+
+[audit]
+# Enable audit logging (default: true)
+enabled = true
+# Audit log file path (default: "/var/log/tuck/audit.log")
+log_path = "/var/log/tuck/audit.log"
+# Maximum audit entries in memory (default: 100000)
+max_entries = 100000
+# Flush interval in milliseconds (default: 1000)
+flush_interval_ms = 1000
+# Include full request payload in audit (may contain sensitive data, default: false)
+include_payload = false
+
+[credential]
+# Store type: "file", "memory", "hsm" (default: "file")
+store_type = "file"
+# Store path for file store (default: "/etc/tuck/credentials.enc")
+store_path = "/etc/tuck/credentials.enc"
+# Master key for file store encryption (use TUCK_CREDENTIAL__MASTER_KEY env var in production)
+# master_key = "your-32-byte-hex-key-here"
+# Maximum credential size in bytes (default: 4096)
+max_credential_size = 4096
+
+[hsm]
+# Enable HSM (default: false)
+enabled = false
+# HSM library path (PKCS#11)
+# library_path = "/usr/lib/softhsm/libsofthsm2.so"
+# HSM slot ID
+# slot_id = 0
+# HSM PIN (use env var in production)
+# pin = "1234"
+
+[hot_reload]
+# Enable hot reload of credentials and policies (default: false)
+enabled = false
+# Watch interval in seconds (default: 30)
+watch_interval_s = 30
+# Watch paths (credentials, policies)
+# watch_paths = ["/etc/tuck/credentials.enc", "/etc/tuck/policy.toml"]
+
+[log]
+# Log level: "trace", "debug", "info", "warn", "error" (default: "info")
+level = "info"
+# Log format: "json", "text" (default: "json")
+format = "json"
+# Log file path (None = stdout)
+# file_path = "/var/log/tuck/tuck.log"
+# Include timestamp in logs (default: true)
+include_timestamp = true
+# Include target (module path) in logs (default: true)
+include_target = true
+
+[metrics]
+# Enable Prometheus metrics (default: true)
+enabled = true
+# Metrics endpoint path (default: "/metrics")
+path = "/metrics"
+# Metrics listen port (0 = same port as main server, default: 0)
+port = 0

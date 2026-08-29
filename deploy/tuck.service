@@ -1,0 +1,56 @@
+[Unit]
+Description=Tuck — Helix ecosystem immune system (CI-144 PFP security gate)
+Documentation=https://github.com/Jasonmilk/Tuck
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=tuck
+Group=tuck
+
+# Executable and config
+ExecStart=/usr/local/bin/tuck --config /etc/tuck/config.toml
+ExecReload=/bin/kill -HUP $MAINPID
+
+# Restart policy
+Restart=on-failure
+RestartSec=5s
+StartLimitInterval=60s
+StartLimitBurst=5
+
+# Security hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/log/tuck /var/lib/tuck
+ReadOnlyPaths=/etc/tuck
+
+# Capabilities
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=512
+MemoryMax=512M
+CPUQuota=200%
+
+# Environment
+Environment=RUST_LOG=info
+Environment=TUCK_LOG__FORMAT=json
+
+# Sandbox
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

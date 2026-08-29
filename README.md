@@ -56,9 +56,9 @@ crates/
 ## 测试覆盖率
 
 ```
-212 tests passed, 0 failed, 0 warning
+310 tests passed, 0 failed
 ├── 28 PFP/决策测试（含 ≥12 故障注入类别，100% Reject）
-├── 10 SAP 可选增强测试（重放检测、版本验证、缓存隔离）
+├── 27 SAP 可选增强测试（重放检测/签名验证/LRU缓存/decide_with_sap）
 ├── 9 策略配置测试（TOML 加载/保存/版本验证/自定义策略）
 ├── 9 HITL 执行闸测试（确认/拒绝/超时 fail-closed/历史记录）
 ├── 9 CATASTROPHIC 硬覆盖测试（紧急信号/广播通知/优先级/审计）
@@ -73,7 +73,14 @@ crates/
 ├── 16 篡改检测测试（5种篡改类型/TamperReport/历史整合/端到端链验证）
 ├── 16 帧解析测试（FrameHeader/Frame/FrameBuilder/零拷贝/向后兼容）
 ├── 14 HTTP 拦截测试（PFP 头提取/decide/Allow/Reject/HITL/HardOverride/错误处理）
-└── 9 出网处理测试（Allow+注入/Reject无注入/HardOverride/缺失头/凭证未找到）
+├── 9 出网处理测试（Allow+注入/Reject无注入/HardOverride/缺失头/凭证未找到）
+├── 15 Mind联调测试（SecurityEvent/AuditQuery/PFP构造指南/桥接trait）
+├── 11 Anaphase联调测试（SecurityGate/TuckSecurityGate/凭证注入/桥接trait）
+├── 12 Tentacle联调测试（PluginAudit/ToolGate/SandboxConstraints/桥接trait）
+├── 15 配置管理测试（TOML解析/环境变量/验证/往返序列化）
+├── 9 结构化日志测试（级别验证/初始化/格式/宏）
+├── 13 监控指标测试（决策/风险/延迟/凭证/审计/SAP/插件/错误/Prometheus格式）
+└── 10 健康检查测试（状态/序列化/组件/指标/审计链失败）
 ```
 
 运行测试：`cargo test --workspace`
@@ -100,6 +107,12 @@ crates/
 | `frame` | CI-144 帧解析器（零拷贝 Frame/FrameHeader/FrameBuilder） | ✅ |
 | `proxy` | HTTP 拦截器（PFP 头提取 + decide + InterceptResult） | ✅ |
 | `outbound` | 出网处理器（拦截+凭证注入集成 + OutboundHandler） | ✅ |
+| `mind_bridge` | Helix-Mind联调（SecurityEvent/AuditQuery/PFP构造指南） | ✅ |
+| `anaphase_bridge` | Anaphase联调（SecurityGate/TuckSecurityGate/凭证注入） | ✅ |
+| `tentacle_bridge` | Tentacle联调（PluginAudit/ToolGate/SandboxConstraints） | ✅ |
+| `config` | 配置管理（TOML解析/环境变量覆盖/配置验证） | ✅ |
+| `metrics` | 监控指标（Prometheus格式/原子计数器/决策/延迟/错误） | ✅ |
+| `health` | 健康检查（组件状态/指标摘要/Kubernetes探针） | ✅ |
 
 ## 快速开始
 
@@ -147,12 +160,99 @@ Byte 3:
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | P0 | 方法论初始化 + Rust 项目骨架 | ✅ 已完成 |
-| P1 | 核心骨架（PFP 读取 + decide() + fail-closed） | 🚧 进行中 |
-| P2 | 策略引擎（Risk-Level 策略 + HITL + CATASTROPHIC） | ⏳ |
-| P3 | 凭证物理注入（identity_label + 零化 + HSM） | ⏳ |
-| P4 | 全息审计（SHA-256 链式 + WORM + 查询 API） | ⏳ |
-| P5 | 传输层集成（CI-144 代理 + HTTP 中间件） | ⏳ |
-| P6 | 生态联调（Anaphase/Tentacle/Cellrix） | ⏳ |
+| P1 | 核心骨架（PFP 读取 + decide() + fail-closed） | ✅ 已完成 |
+| P2 | 策略引擎（Risk-Level 策略 + HITL + CATASTROPHIC） | ✅ 已完成 |
+| P3 | 凭证物理注入（identity_label + 零化 + HSM） | ✅ 已完成 |
+| P4 | 全息审计（SHA-256 链式 + WORM + 查询 API） | ✅ 已完成 |
+| P5 | 传输层集成（CI-144 代理 + HTTP 中间件） | ✅ 已完成 |
+| P6 | 生态联调（CI-144/Mind/Anaphase/Tentacle） | ✅ 已完成 |
+| P7 | 生产就绪（配置/日志/监控/健康检查/部署） | ✅ 已完成 |
+
+## 部署
+
+### Docker
+
+```bash
+# 构建镜像
+docker build -t tuck:latest .
+
+# 运行
+docker run -d \
+  --name tuck \
+  -p 8443:8443 \
+  -v /etc/tuck:/etc/tuck:ro \
+  -v /var/log/tuck:/var/log/tuck \
+  tuck:latest
+```
+
+### systemd
+
+```bash
+# 复制 service 文件
+sudo cp deploy/tuck.service /etc/systemd/system/
+
+# 创建用户和目录
+sudo useradd --system tuck
+sudo mkdir -p /etc/tuck /var/log/tuck /var/lib/tuck
+sudo chown -R tuck:tuck /etc/tuck /var/log/tuck /var/lib/tuck
+
+# 复制配置
+sudo cp config.example.toml /etc/tuck/config.toml
+
+# 启动
+sudo systemctl enable --now tuck
+
+# 查看状态
+sudo systemctl status tuck
+sudo journalctl -u tuck -f
+```
+
+### 配置
+
+复制 `config.example.toml` 为 `config.toml` 并修改。支持环境变量覆盖：
+
+```bash
+export TUCK_SERVER__PORT=9090
+export TUCK_LOG__LEVEL=debug
+export TUCK_LOG__FORMAT=json
+export TUCK_CREDENTIAL__MASTER_KEY=your-hex-key
+```
+
+## 监控
+
+### Prometheus 指标
+
+默认在 `/metrics` 端点暴露 Prometheus 格式指标：
+
+- `tuck_decisions_total{decision="pass|reject|hitl|hard_override"}` — 决策计数
+- `tuck_risk_levels_total{risk="low|medium|critical|catastrophic"}` — 风险等级计数
+- `tuck_decision_latency_seconds` — 平均决策延迟
+- `tuck_credential_injections_total{result="success|failed"}` — 凭证注入结果
+- `tuck_credential_lookups_total{result="hit|miss"}` — 凭证查找结果
+- `tuck_audit_entries_total` — 审计条目数
+- `tuck_audit_chain_verifications_total{result="success|failure"}` — 审计链验证
+- `tuck_sap_verifications_total{result="success|failed"}` — SAP 签名验证
+- `tuck_replay_cache_total{result="hit|miss"}` — 重放缓存
+- `tuck_plugin_audits_total{decision="pass|reject|hitl"}` — 插件审计
+- `tuck_errors_total{type="invalid_pfp|invalid_sap|config_error"}` — 错误计数
+- `tuck_uptime_seconds` — 运行时间
+
+### 健康检查
+
+`/health` 端点返回 JSON 格式健康状态：
+
+```json
+{
+  "status": "healthy",
+  "service": "tuck",
+  "version": "0.1.0",
+  "uptime_seconds": 1234,
+  "components": [...],
+  "metrics": {...}
+}
+```
+
+适用于 Kubernetes liveness/readiness 探针和负载均衡器健康检查。
 
 ## 生态对齐
 
