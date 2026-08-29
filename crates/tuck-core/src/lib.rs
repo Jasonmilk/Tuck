@@ -33,6 +33,7 @@ pub mod tamper;
 pub mod frame;
 pub mod proxy;
 pub mod outbound;
+pub mod mind_bridge;
 
 // ============================================================================
 // PFP Header (4 bytes / 32 bits)
