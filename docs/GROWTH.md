@@ -5,6 +5,31 @@
 
 ---
 
+### 2026-08-29 P4 全息审计 ✅ 完成
+
+- **事件**：P4 全息审计 — SHA-256 链式审计日志 + WORM 追加写存储 + 查询 API + 篡改检测 + 历史整合
+- **关键决策**：
+  - 审计日志使用 SHA-256 链式结构（每条包含前一条哈希），篡改即断链
+  - WORM 存储使用 JSON Lines 格式（每行一个 JSON 对象），追加写，崩溃可恢复
+  - 查询 API 支持多维度筛选（时间范围/Risk-Level/决策类型/来源/identity_label）+ 分页 + 排序
+  - 篡改检测返回详细 TamperReport（5 种篡改类型：HashMismatch/PrevHashMismatch/MissingGenesis/DuplicateEntryId）
+  - 与现有历史整合：HITL/CATASTROPHIC/策略重载事件可转换为审计条目
+  - 审计写入不阻塞硬实时路径（decide() 异步记录审计）
+- **代码实现**：
+  - `audit.rs`：AuditEntry + AuditLog（链式结构 + verify_chain + push_raw）
+  - `audit_store.rs`：AuditStore（WORM 文件存储 + 崩溃恢复 + 篡改文件检测 + StoreStats）
+  - `audit_query.rs`：AuditQuery + QueryResult + Queryable trait（多维度筛选 + 分页 + 排序）
+  - `tamper.rs`：TamperReport + TamperFinding + detect_tampering() + 历史整合转换函数
+- **测试结果**：173 个测试全部通过（123 P0-P3 + 14 audit + 9 audit_store + 14 audit_query + 16 tamper/相关），0 failure
+- **核心承诺**：
+  - 承诺 1（亚微秒决策）：✅ P1 验证，P4 审计异步写入不影响
+  - 承诺 2（fail-closed）：✅ P1 验证 + P2 HITL 超时自动 Reject
+  - 承诺 3（凭证永不在组件内存中）：✅ P3 实现
+  - 承诺 4（每一次决策都不可篡改地记录）：✅ **P4 实现**（SHA-256 链式日志 + WORM 存储 + 篡改检测）
+- **六大工程原则**：全部体现（极致解耦：审计/存储/查询/篡改检测独立模块 / 按需加载：查询时扫描，无预计算索引 / 按需驱动：审计异步写入，无轮询 / 极致复用：SHA-256/serde/tokio 生态复用 / 物理事实优先：篡改检测基于密码学哈希，非信任 / 确定性优先：固定哈希算法 + 链式结构）
+- **健康度**：173 tests + 14 模块，4 条核心承诺全部实现
+- **版本**：v0.5.0（P4 完成）
+
 ### 2026-08-29 P3 凭证物理注入 ✅ 完成
 
 - **事件**：P3 凭证物理注入 — identity_label 映射 + 物理边缘注入 + 加密文件存储 + 零化验证 + HSM/TPM trait 预留

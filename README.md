@@ -56,7 +56,7 @@ crates/
 ## 测试覆盖率
 
 ```
-123 tests passed, 0 failed, 0 warning
+173 tests passed, 0 failed, 0 warning
 ├── 28 PFP/决策测试（含 ≥12 故障注入类别，100% Reject）
 ├── 10 SAP 可选增强测试（重放检测、版本验证、缓存隔离）
 ├── 9 策略配置测试（TOML 加载/保存/版本验证/自定义策略）
@@ -66,7 +66,11 @@ crates/
 ├── 22 凭证管理测试（identity_label/Credential/Zeroizing/CredentialStore）
 ├── 17 物理边缘注入测试（HttpHeader/Bearer/QueryParam/BodyField/BasicAuth）
 ├── 13 加密文件存储测试（AES-256-GCM/主密钥/原子写入/错误密钥拒绝）
-└── 10 HSM/TPM trait 测试（trait 对象安全/KeyAlgorithm/PcrPolicy/AttestationQuote）
+├── 10 HSM/TPM trait 测试（trait 对象安全/KeyAlgorithm/PcrPolicy/AttestationQuote）
+├── 14 审计日志测试（SHA-256 链式结构/verify_chain/篡改检测/容量限制）
+├── 9 WORM 存储测试（追加写/崩溃恢复/篡改文件检测/统计信息）
+├── 14 审计查询测试（多维度筛选/分页/排序/组合过滤/序列化）
+└── 16 篡改检测测试（5种篡改类型/TamperReport/历史整合/端到端链验证）
 ```
 
 运行测试：`cargo test --workspace`
@@ -85,6 +89,10 @@ crates/
 | `injection` | 物理边缘注入（出网前注入 + 注入后 zeroize） | ✅ |
 | `file_store` | 加密文件存储（AES-256-GCM + MasterKey + 原子写入） | ✅ |
 | `hsm` | HSM/TPM trait 预留（HsmCredentialStore + TpmCredentialStore） | ✅ |
+| `audit` | 审计日志（SHA-256 链式结构 + AuditLog + verify_chain） | ✅ |
+| `audit_store` | WORM 存储（追加写文件 + 崩溃恢复 + 篡改检测） | ✅ |
+| `audit_query` | 审计查询 API（多维度筛选 + 分页 + 排序 + Queryable trait） | ✅ |
+| `tamper` | 篡改检测（TamperReport + 5种篡改类型 + 历史整合转换） | ✅ |
 
 ## 快速开始
 

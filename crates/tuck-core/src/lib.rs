@@ -26,6 +26,10 @@ pub mod credential;
 pub mod injection;
 pub mod file_store;
 pub mod hsm;
+pub mod audit;
+pub mod audit_store;
+pub mod audit_query;
+pub mod tamper;
 
 // ============================================================================
 // PFP Header (4 bytes / 32 bits)
