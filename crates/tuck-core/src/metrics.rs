@@ -24,6 +24,49 @@ use std::time::Instant;
 // Metrics Registry
 // ============================================================================
 
+/// Structured decision-counter snapshot (runtime cumulative).
+///
+/// Read-side projection of the four decision atomics. P6-T5 status flow
+/// consumes this instead of the raw atomics (encapsulation + typed reads).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DecisionCounts {
+    /// Allow decisions.
+    pub pass: u64,
+    /// Deny decisions.
+    pub reject: u64,
+    /// Human-in-the-loop pending decisions.
+    pub hitl: u64,
+    /// Hard-override pass decisions.
+    pub hard_override: u64,
+}
+
+impl DecisionCounts {
+    /// Total decisions observed.
+    pub fn total(&self) -> u64 {
+        self.pass + self.reject + self.hitl + self.hard_override
+    }
+}
+
+/// Structured risk-level counter snapshot (runtime cumulative).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RiskCounts {
+    /// Low-risk decisions.
+    pub low: u64,
+    /// Medium-risk decisions.
+    pub medium: u64,
+    /// Critical-risk decisions.
+    pub critical: u64,
+    /// Catastrophic-risk decisions.
+    pub catastrophic: u64,
+}
+
+impl RiskCounts {
+    /// Total risk observations.
+    pub fn total(&self) -> u64 {
+        self.low + self.medium + self.critical + self.catastrophic
+    }
+}
+
 /// Tuck metrics registry — all metrics are atomic counters/gauges.
 ///
 /// Cloning is cheap (Arc internally). Pass by value to handlers.
@@ -172,9 +215,31 @@ impl Metrics {
         };
     }
 
+    /// Snapshot of decision counters (runtime cumulative).
+    ///
+    /// Read-side projection used by the P6-T5 status flow. Consistent with
+    /// the observe path: disabled metrics report zero counts.
+    pub fn decision_counts(&self) -> DecisionCounts {
+        DecisionCounts {
+            pass: self.inner.decisions_pass.load(Ordering::Relaxed),
+            reject: self.inner.decisions_reject.load(Ordering::Relaxed),
+            hitl: self.inner.decisions_hitl.load(Ordering::Relaxed),
+            hard_override: self.inner.decisions_hard_override.load(Ordering::Relaxed),
+        }
+    }
+
+    /// Snapshot of risk-level counters (runtime cumulative).
+    pub fn risk_counts(&self) -> RiskCounts {
+        RiskCounts {
+            low: self.inner.risk_low.load(Ordering::Relaxed),
+            medium: self.inner.risk_medium.load(Ordering::Relaxed),
+            critical: self.inner.risk_critical.load(Ordering::Relaxed),
+            catastrophic: self.inner.risk_catastrophic.load(Ordering::Relaxed),
+        }
+    }
+
     /// Observe decision latency.
-    pub fn observe_decision_latency(&self, duration_ns: u64) {
-        if !self.enabled {
+    pub fn observe_decision_latency(&self, duration_ns: u64) {        if !self.enabled {
             return;
         }
         self.inner

@@ -39,6 +39,7 @@ pub mod tentacle_bridge;
 pub mod config;
 pub mod metrics;
 pub mod health;
+pub mod status;
 
 // ============================================================================
 // PFP Header (4 bytes / 32 bits)

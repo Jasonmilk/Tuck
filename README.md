@@ -53,12 +53,15 @@ crates/
 
 运行基准：`cargo bench -p tuck-core`
 
+- **P6-T5 状态流（ADR-0003）**：`StatusProvider` 拉模式查询接口（`summary()` 实时累计快照 + `recent_decisions()` 最近事件投影），聚合 Metrics 原子计数 + 复用 P4 审计链，零新存储/写路径——Cellrix 展示层的窗口
+
 ## 测试覆盖率
 
 ```
-310 tests passed, 0 failed
+316 tests passed, 0 failed
 ├── 28 PFP/决策测试（含 ≥12 故障注入类别，100% Reject）
 ├── 27 SAP 可选增强测试（重放检测/签名验证/LRU缓存/decide_with_sap）
+├── 6 状态流测试（StatusProvider：summary 聚合/recent 倒序投影/空日志/裁剪/disabled）
 ├── 9 策略配置测试（TOML 加载/保存/版本验证/自定义策略）
 ├── 9 HITL 执行闸测试（确认/拒绝/超时 fail-closed/历史记录）
 ├── 9 CATASTROPHIC 硬覆盖测试（紧急信号/广播通知/优先级/审计）
@@ -165,7 +168,7 @@ Byte 3:
 | P3 | 凭证物理注入（identity_label + 零化 + HSM） | ✅ 已完成 |
 | P4 | 全息审计（SHA-256 链式 + WORM + 查询 API） | ✅ 已完成 |
 | P5 | 传输层集成（CI-144 代理 + HTTP 中间件） | ✅ 已完成 |
-| P6 | 生态联调（CI-144/Mind/Anaphase/Tentacle） | ✅ 已完成 |
+| P6 | 生态联调（CI-144/Mind/Anaphase/Tentacle/Cellrix 状态流） | ✅ 已完成 |
 | P7 | 生产就绪（配置/日志/监控/健康检查/部署） | ✅ 已完成 |
 
 ## 部署
