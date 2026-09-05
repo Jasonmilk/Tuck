@@ -294,12 +294,12 @@ pub trait CredentialStore: Send + Sync {
 ///
 /// Stores credentials in a HashMap. Credentials are zeroized on removal/drop.
 /// NOT for production use (credentials persist in memory until process exit).
-#[cfg(test)]
+#[cfg(any(test, feature = "test-utils"))]
 pub struct InMemoryCredentialStore {
     credentials: std::sync::Mutex<std::collections::HashMap<String, Vec<u8>>>,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-utils"))]
 impl InMemoryCredentialStore {
     pub fn new() -> Self {
         Self {
@@ -315,7 +315,7 @@ impl InMemoryCredentialStore {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-utils"))]
 #[async_trait::async_trait]
 impl CredentialStore for InMemoryCredentialStore {
     async fn get(&self, label: &IdentityLabel) -> Result<Credential, CredentialError> {
