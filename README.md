@@ -1,136 +1,138 @@
 # Tuck
 
-> **Helix 生态免疫系统 / 无情闸门**
+> **Helix Ecosystem Immune System / The Uncompromising Gate**
 >
-> CI-144 PFP-xCF14 第一个消费者 · 亚微秒级硬实时决策 · fail-closed · 零信任凭证物理注入 · 全息审计
+> CI-144 PFP-xCF14 first consumer · sub-microsecond hard real-time decisions · fail-closed · zero-trust credential physical injection · holographic audit
+
+> **中文版 (Chinese Version)**: [README.zh-CN.md](./README.zh-CN.md)
 
 ---
 
-## 一句话定位
+## One-Line Positioning
 
-**Tuck 是 Helix 的免疫系统——用 4 字节 PFP 物理特征，在亚微秒内做出放行/拦截/人类确认的决策。它不思考、不编排、不执行，只过滤。**
+**Tuck is Helix's immune system — using the 4-byte PFP physical features, it makes pass/intercept/human-confirm decisions in sub-microseconds. It does not think, does not orchestrate, does not execute. It only filters.**
 
-## 核心承诺
+## Core Commitments
 
-| # | 承诺 | 含义 | 验收标准 |
+| # | Commitment | Meaning | Acceptance criteria |
 |---|---|---|---|
-| 1 | 只读 4 字节，亚微秒级决策 | PFP 固定偏移读取，位运算，无分支 | p99 < 1μs |
-| 2 | fail-closed，永不放行未知 | 任何异常默认拦截 | 故障注入 100% 拦截 |
-| 3 | 凭证永不在组件内存中 | identity_label 流转，物理边缘注入，零化 | 内存 grep 不出明文凭证 |
-| 4 | 每一次决策都不可篡改地记录 | SHA-256 链式日志，WORM 存储 | 篡改可检测 |
+| 1 | Reads only 4 bytes, sub-microsecond decision | PFP fixed-offset read, bit operations, no branches | p99 < 1μs |
+| 2 | fail-closed, never passes the unknown | any anomaly defaults to intercept | fault injection 100% intercept |
+| 3 | Credentials never in component memory | identity_label flow, physical edge injection, zeroization | memory grep finds no plaintext credential |
+| 4 | Every decision recorded tamper-proof | SHA-256 chained log, WORM storage | tampering detectable |
 
-## 六大工程原则
+## Six Engineering Principles
 
-- **极致解耦**：core 无网络依赖，硬实时路径与传输层分离
-- **按需加载**：PFP 字段惰性位运算提取，非实时功能后置
-- **按需驱动**：事件驱动，无轮询，`decide()` 每帧调用
-- **极致复用**：复用 CI-144 BIND-19 PFP 类型，不自己实现帧解析
-- **物理事实优先**：决策基于 PFP 传感器特征，非 AI 语义推理
-- **确定性优先**：固定偏移、位运算、match 跳转表、无分支、无堆分配
+- **Extreme decoupling**: core has no network dependency; hard real-time path separated from transport layer
+- **On-demand loading**: PFP fields lazily extracted by bit operations; non-real-time features deferred
+- **On-demand driving**: event-driven, no polling, `decide()` called per frame
+- **Extreme reuse**: reuses CI-144 BIND-19 PFP types, does not implement its own frame parsing
+- **Physical facts first**: decisions based on PFP sensor features, not AI semantic reasoning
+- **Determinism first**: fixed offset, bit operations, match jump table, no branches, no heap allocation
 
-## 架构
+## Architecture
 
 ```
 crates/
-├── tuck-core/      # 硬实时核心：PFP 读取、decide()、fail-closed、Decision 类型
-├── tuck-policy/    # 策略引擎：Risk-Level 策略配置、HITL 执行闸（P2）
-├── tuck-credential/# 凭证物理注入：identity_label → 明文凭证、零化、HSM/TPM（P3）
-├── tuck-audit/     # 全息审计：SHA-256 链式日志、WORM 存储、查询 API（P4）
-├── tuck-proxy/     # 传输层集成：CI-144 帧代理、HTTP 中间件（P5）
-└── tuck/           # 二进制入口：CLI、配置、组装
+├── tuck-core/      # hard real-time core: PFP read, decide(), fail-closed, Decision type
+├── tuck-policy/    # policy engine: Risk-Level policy config, HITL execution gate (P2)
+├── tuck-credential/# credential physical injection: identity_label → plaintext credential, zeroization, HSM/TPM (P3)
+├── tuck-audit/     # holographic audit: SHA-256 chained log, WORM storage, query API (P4)
+├── tuck-proxy/     # transport integration: CI-144 frame proxy, HTTP middleware (P5)
+└── tuck/           # binary entry: CLI, config, assembly
 ```
 
-## 性能基准（criterion, 1000 samples）
+## Performance Benchmarks (criterion, 1000 samples)
 
-| 基准 | p50 | p99 | 吞吐量 | 目标 |
+| Benchmark | p50 | p99 | Throughput | Target |
 |---|---|---|---|---|
 | `decide_from_bytes` CRITICAL | 314.73 ps | **322.89 ps** | 3.10 Gelem/s | < 1μs ✅ (3097x faster) |
 | `decide_from_bytes` invalid_magic | 298.72 ps | 299.75 ps | 3.34 Gelem/s | < 1μs ✅ |
-| PFP `risk_level()` 提取 | 298.78 ps | 299.57 ps | 3.35 Gelem/s | - |
+| PFP `risk_level()` extraction | 298.78 ps | 299.57 ps | 3.35 Gelem/s | - |
 | PFP `effective_risk_level()` | 305.68 ps | 317.91 ps | 3.27 Gelem/s | - |
 
-**硬实时决策延迟：p99 = 0.32 ns，远超 <1μs 目标（快 3097 倍）。**
+**Hard real-time decision latency: p99 = 0.32 ns, far beyond the <1μs target (3097x faster).**
 
-运行基准：`cargo bench -p tuck-core`
+Run benchmarks: `cargo bench -p tuck-core`
 
-- **P6-T5 状态流（ADR-0003）**：`StatusProvider` 拉模式查询接口（`summary()` 实时累计快照 + `recent_decisions()` 最近事件投影），聚合 Metrics 原子计数 + 复用 P4 审计链，零新存储/写路径——Cellrix 展示层的窗口
+- **P6-T5 status flow (ADR-0003)**: `StatusProvider` pull-mode query interface (`summary()` real-time cumulative snapshot + `recent_decisions()` recent-event projection), aggregating Metrics atomic counters + reusing the P4 audit chain, zero new storage/write paths — the window for the Cellrix display layer
 
-## 测试覆盖率
+## Test Coverage
 
 ```
 316 tests passed, 0 failed
-├── 28 PFP/决策测试（含 ≥12 故障注入类别，100% Reject）
-├── 27 SAP 可选增强测试（重放检测/签名验证/LRU缓存/decide_with_sap）
-├── 6 状态流测试（StatusProvider：summary 聚合/recent 倒序投影/空日志/裁剪/disabled）
-├── 9 策略配置测试（TOML 加载/保存/版本验证/自定义策略）
-├── 9 HITL 执行闸测试（确认/拒绝/超时 fail-closed/历史记录）
-├── 9 CATASTROPHIC 硬覆盖测试（紧急信号/广播通知/优先级/审计）
-├── 9 策略热加载测试（文件监控/原子交换/版本管理/重载历史）
-├── 22 凭证管理测试（identity_label/Credential/Zeroizing/CredentialStore）
-├── 17 物理边缘注入测试（HttpHeader/Bearer/QueryParam/BodyField/BasicAuth）
-├── 13 加密文件存储测试（AES-256-GCM/主密钥/原子写入/错误密钥拒绝）
-├── 10 HSM/TPM trait 测试（trait 对象安全/KeyAlgorithm/PcrPolicy/AttestationQuote）
-├── 14 审计日志测试（SHA-256 链式结构/verify_chain/篡改检测/容量限制）
-├── 9 WORM 存储测试（追加写/崩溃恢复/篡改文件检测/统计信息）
-├── 14 审计查询测试（多维度筛选/分页/排序/组合过滤/序列化）
-├── 16 篡改检测测试（5种篡改类型/TamperReport/历史整合/端到端链验证）
-├── 16 帧解析测试（FrameHeader/Frame/FrameBuilder/零拷贝/向后兼容）
-├── 14 HTTP 拦截测试（PFP 头提取/decide/Allow/Reject/HITL/HardOverride/错误处理）
-├── 9 出网处理测试（Allow+注入/Reject无注入/HardOverride/缺失头/凭证未找到）
-├── 15 Mind联调测试（SecurityEvent/AuditQuery/PFP构造指南/桥接trait）
-├── 11 Anaphase联调测试（SecurityGate/TuckSecurityGate/凭证注入/桥接trait）
-├── 12 Tentacle联调测试（PluginAudit/ToolGate/SandboxConstraints/桥接trait）
-├── 15 配置管理测试（TOML解析/环境变量/验证/往返序列化）
-├── 9 结构化日志测试（级别验证/初始化/格式/宏）
-├── 13 监控指标测试（决策/风险/延迟/凭证/审计/SAP/插件/错误/Prometheus格式）
-└── 10 健康检查测试（状态/序列化/组件/指标/审计链失败）
+├── 28 PFP/decision tests (incl. ≥12 fault-injection categories, 100% Reject)
+├── 27 SAP optional enhancement tests (replay detection/signature verification/LRU cache/decide_with_sap)
+├── 6 status-flow tests (StatusProvider: summary aggregation/recent reverse projection/empty log/truncation/disabled)
+├── 9 policy config tests (TOML load/save/version validation/custom policies)
+├── 9 HITL execution gate tests (confirm/reject/timeout fail-closed/history records)
+├── 9 CATASTROPHIC hard-override tests (emergency signal/broadcast notification/priority/audit)
+├── 9 policy hot-reload tests (file monitoring/atomic swap/version management/reload history)
+├── 22 credential management tests (identity_label/Credential/Zeroizing/CredentialStore)
+├── 17 physical edge injection tests (HttpHeader/Bearer/QueryParam/BodyField/BasicAuth)
+├── 13 encrypted file storage tests (AES-256-GCM/master key/atomic write/wrong-key rejection)
+├── 10 HSM/TPM trait tests (trait object safety/KeyAlgorithm/PcrPolicy/AttestationQuote)
+├── 14 audit log tests (SHA-256 chained structure/verify_chain/tamper detection/capacity limits)
+├── 9 WORM storage tests (append write/crash recovery/tampered-file detection/statistics)
+├── 14 audit query tests (multi-dimension filtering/pagination/sorting/composite filters/serialization)
+├── 16 tamper detection tests (5 tamper types/TamperReport/history integration/end-to-end chain verification)
+├── 16 frame parsing tests (FrameHeader/Frame/FrameBuilder/zero-copy/backward compatibility)
+├── 14 HTTP intercept tests (PFP header extraction/decide/Allow/Reject/HITL/HardOverride/error handling)
+├── 9 outbound handling tests (Allow+inject/Reject no-inject/HardOverride/missing header/credential not found)
+├── 15 Mind integration tests (SecurityEvent/AuditQuery/PFP construction guide/bridge traits)
+├── 11 Anaphase integration tests (SecurityGate/TuckSecurityGate/credential injection/bridge traits)
+├── 12 Tentacle integration tests (PluginAudit/ToolGate/SandboxConstraints/bridge traits)
+├── 15 config management tests (TOML parsing/env vars/validation/round-trip serialization)
+├── 9 structured log tests (level validation/initialization/format/macros)
+├── 13 monitoring metrics tests (decision/risk/latency/credential/audit/SAP/plugin/errors/Prometheus format)
+└── 10 health check tests (status/serialization/components/metrics/audit-chain failure)
 ```
 
-运行测试：`cargo test --workspace`
-运行基准：`cargo bench -p tuck-core`
+Run tests: `cargo test --workspace`
+Run benchmarks: `cargo bench -p tuck-core`
 
-## 核心模块
+## Core Modules
 
-| 模块 | 职责 | 状态 |
+| Module | Duty | Status |
 |---|---|---|
-| `pfp` (lib.rs) | PFP 4 字节零拷贝读取 + decide() 硬实时决策 | ✅ |
-| `sap` | SAP 28 字节可选增强 + Seq-Counter 防重放 | ✅ |
-| `policy` | 策略配置（TOML）+ 版本管理 + 文件加载/保存 | ✅ |
-| `hitl` | HITL 执行闸（NeedHumanConfirm → 确认/超时 Reject） | ✅ |
-| `catastrophic` | CATASTROPHIC 硬覆盖（紧急信号 + 并行人类通知） | ✅ |
-| `hot_reload` | 策略热加载（文件监控 + 原子交换 + 重载历史） | ✅ |
-| `credential` | 凭证管理（identity_label + Credential + Zeroizing + CredentialStore trait） | ✅ |
-| `injection` | 物理边缘注入（出网前注入 + 注入后 zeroize） | ✅ |
-| `file_store` | 加密文件存储（AES-256-GCM + MasterKey + 原子写入） | ✅ |
-| `hsm` | HSM/TPM trait 预留（HsmCredentialStore + TpmCredentialStore） | ✅ |
-| `audit` | 审计日志（SHA-256 链式结构 + AuditLog + verify_chain） | ✅ |
-| `audit_store` | WORM 存储（追加写文件 + 崩溃恢复 + 篡改检测） | ✅ |
-| `audit_query` | 审计查询 API（多维度筛选 + 分页 + 排序 + Queryable trait） | ✅ |
-| `tamper` | 篡改检测（TamperReport + 5种篡改类型 + 历史整合转换） | ✅ |
-| `frame` | CI-144 帧解析器（零拷贝 Frame/FrameHeader/FrameBuilder） | ✅ |
-| `proxy` | HTTP 拦截器（PFP 头提取 + decide + InterceptResult） | ✅ |
-| `outbound` | 出网处理器（拦截+凭证注入集成 + OutboundHandler） | ✅ |
-| `mind_bridge` | Helix-Mind联调（SecurityEvent/AuditQuery/PFP构造指南） | ✅ |
-| `anaphase_bridge` | Anaphase联调（SecurityGate/TuckSecurityGate/凭证注入） | ✅ |
-| `tentacle_bridge` | Tentacle联调（PluginAudit/ToolGate/SandboxConstraints） | ✅ |
-| `config` | 配置管理（TOML解析/环境变量覆盖/配置验证） | ✅ |
-| `metrics` | 监控指标（Prometheus格式/原子计数器/决策/延迟/错误） | ✅ |
-| `health` | 健康检查（组件状态/指标摘要/Kubernetes探针） | ✅ |
+| `pfp` (lib.rs) | PFP 4-byte zero-copy read + decide() hard real-time decision | ✅ |
+| `sap` | SAP 28-byte optional enhancement + Seq-Counter replay protection | ✅ |
+| `policy` | policy config (TOML) + version management + file load/save | ✅ |
+| `hitl` | HITL execution gate (NeedHumanConfirm → confirm/timeout Reject) | ✅ |
+| `catastrophic` | CATASTROPHIC hard override (emergency signal + parallel human notification) | ✅ |
+| `hot_reload` | policy hot reload (file monitoring + atomic swap + reload history) | ✅ |
+| `credential` | credential management (identity_label + Credential + Zeroizing + CredentialStore trait) | ✅ |
+| `injection` | physical edge injection (inject before outbound + zeroize after injection) | ✅ |
+| `file_store` | encrypted file storage (AES-256-GCM + MasterKey + atomic write) | ✅ |
+| `hsm` | HSM/TPM trait reservation (HsmCredentialStore + TpmCredentialStore) | ✅ |
+| `audit` | audit log (SHA-256 chained structure + AuditLog + verify_chain) | ✅ |
+| `audit_store` | WORM storage (append-only file + crash recovery + tamper detection) | ✅ |
+| `audit_query` | audit query API (multi-dimension filtering + pagination + sorting + Queryable trait) | ✅ |
+| `tamper` | tamper detection (TamperReport + 5 tamper types + history integration) | ✅ |
+| `frame` | CI-144 frame parser (zero-copy Frame/FrameHeader/FrameBuilder) | ✅ |
+| `proxy` | HTTP interceptor (PFP header extraction + decide + InterceptResult) | ✅ |
+| `outbound` | outbound handler (intercept + credential injection integration + OutboundHandler) | ✅ |
+| `mind_bridge` | Helix-Mind integration (SecurityEvent/AuditQuery/PFP construction guide) | ✅ |
+| `anaphase_bridge` | Anaphase integration (SecurityGate/TuckSecurityGate/credential injection) | ✅ |
+| `tentacle_bridge` | Tentacle integration (PluginAudit/ToolGate/SandboxConstraints) | ✅ |
+| `config` | config management (TOML parsing/env-var override/config validation) | ✅ |
+| `metrics` | monitoring metrics (Prometheus format/atomic counters/decision/latency/errors) | ✅ |
+| `health` | health checks (component status/metrics summary/Kubernetes probes) | ✅ |
 
-## 快速开始
+## Quick Start
 
 ```bash
-# 构建
+# build
 cargo build --workspace
 
-# 测试
+# test
 cargo test --workspace
 
-# 运行（PFP hex bytes）
+# run (PFP hex bytes)
 cargo run --bin tuck -- --pfp CF140800
 ```
 
-## PFP 4 字节结构
+## PFP 4-Byte Structure
 
 ```
 Byte 0-1: Family-Magic (0xCF14)
@@ -146,40 +148,40 @@ Byte 3:
   bit 3-7: Reserved       (must be 0)
 ```
 
-## 决策规则
+## Decision Rules
 
-| Risk-Level | 默认决策 |
+| Risk-Level | Default decision |
 |---|---|
 | LOW | Pass |
 | MEDIUM | Pass |
 | CRITICAL | NeedHumanConfirm |
 | CATASTROPHIC | Reject |
-| CATASTROPHIC + HardOverride | HardOverridePass（不可协商） |
+| CATASTROPHIC + HardOverride | HardOverridePass (non-negotiable) |
 
-**Rule 6**：Replay-Enable=0 时，有效 Risk-Level 强制降级为 MEDIUM（防止重放攻击）。
+**Rule 6**: when Replay-Enable=0, the effective Risk-Level is forcibly downgraded to MEDIUM (replay-attack protection).
 
-## 开发计划
+## Development Plan
 
-| 阶段 | 内容 | 状态 |
+| Stage | Content | Status |
 |---|---|---|
-| P0 | 方法论初始化 + Rust 项目骨架 | ✅ 已完成 |
-| P1 | 核心骨架（PFP 读取 + decide() + fail-closed） | ✅ 已完成 |
-| P2 | 策略引擎（Risk-Level 策略 + HITL + CATASTROPHIC） | ✅ 已完成 |
-| P3 | 凭证物理注入（identity_label + 零化 + HSM） | ✅ 已完成 |
-| P4 | 全息审计（SHA-256 链式 + WORM + 查询 API） | ✅ 已完成 |
-| P5 | 传输层集成（CI-144 代理 + HTTP 中间件） | ✅ 已完成 |
-| P6 | 生态联调（CI-144/Mind/Anaphase/Tentacle/Cellrix 状态流） | ✅ 已完成 |
-| P7 | 生产就绪（配置/日志/监控/健康检查/部署） | ✅ 已完成 |
+| P0 | methodology initialization + Rust project skeleton | ✅ done |
+| P1 | core skeleton (PFP read + decide() + fail-closed) | ✅ done |
+| P2 | policy engine (Risk-Level policies + HITL + CATASTROPHIC) | ✅ done |
+| P3 | credential physical injection (identity_label + zeroization + HSM) | ✅ done |
+| P4 | holographic audit (SHA-256 chained + WORM + query API) | ✅ done |
+| P5 | transport integration (CI-144 proxy + HTTP middleware) | ✅ done |
+| P6 | ecosystem integration (CI-144/Mind/Anaphase/Tentacle/Cellrix status flow) | ✅ done |
+| P7 | production readiness (config/logging/monitoring/health/deployment) | ✅ done |
 
-## 部署
+## Deployment
 
 ### Docker
 
 ```bash
-# 构建镜像
+# build image
 docker build -t tuck:latest .
 
-# 运行
+# run
 docker run -d \
   --name tuck \
   -p 8443:8443 \
@@ -191,28 +193,28 @@ docker run -d \
 ### systemd
 
 ```bash
-# 复制 service 文件
+# copy service file
 sudo cp deploy/tuck.service /etc/systemd/system/
 
-# 创建用户和目录
+# create user and directories
 sudo useradd --system tuck
 sudo mkdir -p /etc/tuck /var/log/tuck /var/lib/tuck
 sudo chown -R tuck:tuck /etc/tuck /var/log/tuck /var/lib/tuck
 
-# 复制配置
+# copy config
 sudo cp config.example.toml /etc/tuck/config.toml
 
-# 启动
+# start
 sudo systemctl enable --now tuck
 
-# 查看状态
+# check status
 sudo systemctl status tuck
 sudo journalctl -u tuck -f
 ```
 
-### 配置
+### Configuration
 
-复制 `config.example.toml` 为 `config.toml` 并修改。支持环境变量覆盖：
+Copy `config.example.toml` to `config.toml` and modify. Environment variable overrides supported:
 
 ```bash
 export TUCK_SERVER__PORT=9090
@@ -221,28 +223,28 @@ export TUCK_LOG__FORMAT=json
 export TUCK_CREDENTIAL__MASTER_KEY=your-hex-key
 ```
 
-## 监控
+## Monitoring
 
-### Prometheus 指标
+### Prometheus Metrics
 
-默认在 `/metrics` 端点暴露 Prometheus 格式指标：
+Prometheus-format metrics exposed at the `/metrics` endpoint by default:
 
-- `tuck_decisions_total{decision="pass|reject|hitl|hard_override"}` — 决策计数
-- `tuck_risk_levels_total{risk="low|medium|critical|catastrophic"}` — 风险等级计数
-- `tuck_decision_latency_seconds` — 平均决策延迟
-- `tuck_credential_injections_total{result="success|failed"}` — 凭证注入结果
-- `tuck_credential_lookups_total{result="hit|miss"}` — 凭证查找结果
-- `tuck_audit_entries_total` — 审计条目数
-- `tuck_audit_chain_verifications_total{result="success|failure"}` — 审计链验证
-- `tuck_sap_verifications_total{result="success|failed"}` — SAP 签名验证
-- `tuck_replay_cache_total{result="hit|miss"}` — 重放缓存
-- `tuck_plugin_audits_total{decision="pass|reject|hitl"}` — 插件审计
-- `tuck_errors_total{type="invalid_pfp|invalid_sap|config_error"}` — 错误计数
-- `tuck_uptime_seconds` — 运行时间
+- `tuck_decisions_total{decision="pass|reject|hitl|hard_override"}` — decision counts
+- `tuck_risk_levels_total{risk="low|medium|critical|catastrophic"}` — risk-level counts
+- `tuck_decision_latency_seconds` — average decision latency
+- `tuck_credential_injections_total{result="success|failed"}` — credential injection results
+- `tuck_credential_lookups_total{result="hit|miss"}` — credential lookup results
+- `tuck_audit_entries_total` — audit entry count
+- `tuck_audit_chain_verifications_total{result="success|failure"}` — audit chain verification
+- `tuck_sap_verifications_total{result="success|failed"}` — SAP signature verification
+- `tuck_replay_cache_total{result="hit|miss"}` — replay cache
+- `tuck_plugin_audits_total{decision="pass|reject|hitl"}` — plugin audits
+- `tuck_errors_total{type="invalid_pfp|invalid_sap|config_error"}` — error counts
+- `tuck_uptime_seconds` — uptime
 
-### 健康检查
+### Health Checks
 
-`/health` 端点返回 JSON 格式健康状态：
+The `/health` endpoint returns JSON health status:
 
 ```json
 {
@@ -255,31 +257,31 @@ export TUCK_CREDENTIAL__MASTER_KEY=your-hex-key
 }
 ```
 
-适用于 Kubernetes liveness/readiness 探针和负载均衡器健康检查。
+Suitable for Kubernetes liveness/readiness probes and load-balancer health checks.
 
-## 生态对齐
+## Ecosystem Alignment
 
-- **CI-144 协议家族**：https://github.com/CommonIntents/BIND-19
-- **PFP-xCF14 规范**：https://github.com/CommonIntents/PFP-xCF14
-- **phyt-DNA 方法论**：https://github.com/Jasonmilk/phyt-DNA
-- **Helix-Mind**（灵魂/思考）：https://github.com/Jasonmilk/Helix-Mind
-- **Anaphase-Helix**（身体/编排）：https://github.com/Jasonmilk/Anaphase-Helix
-- **Helix-Tentacle**（手/工具执行）：https://github.com/Jasonmilk/Helix-Tentacle
+- **CI-144 protocol family**: https://github.com/CommonIntents/BIND-19
+- **PFP-xCF14 spec**: https://github.com/CommonIntents/PFP-xCF14
+- **phyt-DNA methodology**: https://github.com/Jasonmilk/phyt-DNA
+- **Helix-Mind** (soul/thinking): https://github.com/Jasonmilk/Helix-Mind
+- **Anaphase-Helix** (body/orchestration): https://github.com/Jasonmilk/Anaphase-Helix
+- **Helix-Tentacle** (hands/tool execution): https://github.com/Jasonmilk/Helix-Tentacle
 
-## 方法论
+## Methodology
 
-Tuck 采用 **phyt-DNA v1.0** 自生长方法论。核心文档：
+Tuck follows the **phyt-DNA v1.0** self-growing methodology. Core documents:
 
-- `docs/VISION.md` — 愿景索引（思想对齐）
-- `docs/DNA.md` — 不可变原则 + Tuck 特有铁律
-- `docs/RNA.md` — 加载协议 + AI 协作铁律
-- `docs/SPEC.md` — 完整叙事（知识本体）
-- `docs/PLAN.md` — 开发导航牌
-- `docs/GROWTH.md` — 生长记录
-- `docs/DEPRECATE.md` — 退役记录
-- `docs/spec/` — 哲学/架构/契约/安全/定位分卷
-- `docs/decisions/` — ADR 架构决策记录
+- `docs/VISION.md` — vision index (thought alignment)
+- `docs/DNA.md` — immutable principles + Tuck-specific ironclad rules
+- `docs/RNA.md` — loading protocol + AI collaboration rules
+- `docs/SPEC.md` — complete narrative (knowledge ontology)
+- `docs/PLAN.md` — development navigation board
+- `docs/GROWTH.md` — growth records
+- `docs/DEPRECATE.md` — retirement records
+- `docs/spec/` — philosophy/architecture/contract/safety/position volumes
+- `docs/decisions/` — ADR architecture decision records
 
 ## License
 
-MIT
+Apache 2.0 (unified ecosystem license per phyt-DNA PROTECTION v1.1)
