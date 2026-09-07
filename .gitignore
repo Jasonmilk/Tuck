@@ -23,3 +23,6 @@ logs/
 
 # Real deployment config (contains secrets)
 config.toml
+
+# Runtime audit artifacts
+*.jsonl
