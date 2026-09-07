@@ -1,18 +1,40 @@
 # Tuck 开发导航牌（PLAN）
 
-> **版本**：v0.8.0（P0-P7 全部完成，2026-09-05）
-> **状态**：✅ P0-P7 全部完成 — 生态消费待联动（Cellrix 渲染 / Anaphase D'-2）
-> **上一阶段**：P6-T5 — Cellrix 状态流（ADR-0003）✅ 本次完成
+> **版本**：v0.9.0（内容治理网关 v1 完成，2026-09-07）
+> **状态**：✅ 内容治理网关 v1（审计链 + 身份门 + 检测/混淆/拦截/全量审计）— 365 tests 全绿；旁路焊死待 Anaphase 联动
+> **上一阶段**：G-1..G-4 — 内容治理网关（ADR-0004）✅ 本次完成
 > **分支**：rs
 > **所属方法论**：phyt-DNA v1.0（PLAN 动态流转闭环，方法论锚点项目 https://github.com/Jasonmilk/phyt-DNA）
 > **规则**：本文件只含当前阶段 + 下一阶段预览 + 阶段总览地图。完成阶段 → GROWTH.md。总行数 ≤150，超出触发历史迁移。
 
 ---
 
-## 1. 当前阶段：P6-T5 完成 → P6/P7 全绿
+## 1. 当前阶段：内容治理网关 v1（ADR-0004）✅ 完成
 
-> **状态**：✅ 完成。P6 五任务（T1 SAP / T2 Mind / T3 Anaphase / T4 Tentacle / T5 Cellrix）与 P7 四项（配置/日志/监控/部署）全部落地；P6-T5 本次补上（ADR-0003）。
-> **前置**：P6-T1..T4 + P7 已实现并推送（git 核验 `613051d`..`0b42e0a`），本轮核验后补 P6-T5 与文档对齐。
+> **状态**：✅ G-1..G-4 全部落地，365 tests 全绿（316 + tuck-audit 11 + gateway 38）。
+> **前置**：P0-P7 完成（rs 分支）；P4 全息审计此前为蓝图先行，本轮真实兑现。
+
+### 1.1 内容治理网关交付（ADR-0004）
+
+| 任务 | 内容 | 状态 |
+|---|---|---|
+| G-1 | tuck-audit 通用链（seq/ts/payload/prev_hash/hash + Clock 注入 + 崩溃续写 + 篡改检测） | ✅ commit 03fbc32 |
+| G-2 | Ed25519 批锚定（Anchor 进链 + verify_anchors + min_anchors 防整链重写） | ✅ commit 03fbc32 |
+| G-3 | 网关骨架（OpenAI 兼容代理 + SSE 流式透传 + auth 转发 + 502） | ✅ commit 20f22ab |
+| G-4 | 检测引擎（dict/regex/entropy 三类规则，中文按字节熵误报已修） | ✅ commit d49e98c |
+| G-5 | 政策矩阵（pass/block/hold × none/redact × alert，目的地分级，fail-closed） | ✅ commit 0adfc55 |
+| G-6 | 映射表（会话级确定性占位符 + redact/demap + demap_miss 不吞不拦） | ✅ commit 2867e1d |
+| G-7 | 全链路接线（检测→政策→redact→转发→JSON/SSE demap 滚动 carry） | ✅ commit 7eebb33 |
+| G-8 | 身份门（Bearer fail-closed）+ 审计全量接入（request/response 双记录 + trace_id）+ 链文件 0600 | ✅ commit b9733b5 |
+
+### 1.2 验收标准（G 全项）
+
+- 本地外网全量过门：本地卫生（永不 block），外网全拦 ✅
+- 每笔调用 2 条链记录（request/response），trace_id 跨账本关联 ✅
+- 审计链只存混淆态，映射表驻内存绝不入链 ✅
+- 无密钥 = 拒绝一切（fail-closed）✅
+- 篡改/删行/重排/整链重写全部检测（哈希链 + 签名锚定）✅
+- 测试：365 passed / 0 failed（tuck-audit 11 + gateway 38 + core 316）
 
 ### 1.1 P6 任务状态（以 git 与代码为准）
 
@@ -41,20 +63,21 @@
 - T5：决策状态可查询（summary/recent，316 测试覆盖）✅
 - 测试：316 passed / 0 failed（+6 status 测试）
 
-### 1.4 核心承诺状态
+### 1.3 核心承诺状态
 
 | 承诺 | 状态 | 落地阶段 |
 |---|---|---|
 | 1 只读 4 字节，亚微秒级决策 | ✅ p99=322.89ps | P1 |
 | 2 fail-closed，永不放行未知 | ✅ P1+P2+P5 | P1/P2/P5 |
 | 3 凭证永不在组件内存中 | ✅ P3+P5（zeroize） | P3/P5 |
-| 4 每一次决策都不可篡改地记录 | ✅ P4（SHA-256 链 + WORM） | P4 |
+| 4 每一次决策都不可篡改地记录 | ✅ P4 真实兑现（tuck-audit SHA-256 链 + Ed25519 锚定） | G-1/G-2 |
 
-### 1.5 入口 ADR
+### 1.4 入口 ADR
 
 - **ADR-0001**：Rust 重构 + 思想重新对齐（Active）
 - **ADR-0002**：PFP 依赖策略 — 本地零拷贝实现（Active）
-- **ADR-0003**：Cellrix 状态流 — StatusProvider 拉模式查询 + 审计投影（Active，本次）
+- **ADR-0003**：Cellrix 状态流 — StatusProvider 拉模式查询 + 审计投影（Active）
+- **ADR-0004**：内容治理网关 — Tuck 差异化本体（Active，本次）
 
 ---
 
@@ -77,11 +100,12 @@ Tuck 接口面已全部就绪，下一阶段是**生态消费**（非 Tuck 仓�
 | P1 | 核心骨架（PFP 读取 + 硬实时决策 + fail-closed + SAP 可选增强） | ✅ 已完成 |
 | P2 | 策略引擎（策略配置 + HITL 执行闸 + CATASTROPHIC 硬覆盖 + 热加载） | ✅ 已完成 |
 | P3 | 凭证物理注入（identity_label → 明文凭证 + zeroize + HSM/TPM） | ✅ 已完成 |
-| P4 | 全息审计（SHA-256 链式日志 + WORM 存储 + 查询 API + 篡改检测） | ✅ 已完成 |
+| P4 | 全息审计（SHA-256 链式日志 + WORM 存储 + 查询 API + 篡改检测） | ✅ 已完成（G-1/G-2 真实兑现） |
 | P5 | 传输层集成（CI-144 帧解析 + HTTP 拦截 + 凭证注入 + 性能压测） | ✅ 已完成 |
 | P6 | 生态联调（SAP 对接 + Mind/Anaphase/Tentacle/Cellrix 接口） | ✅ 已完成 |
 | P7 | 生产就绪（配置/日志/监控/部署） | ✅ 已完成 |
-| 消费期 | 生态消费联动（Cellrix 渲染 / Anaphase D'-2 / Mind P10a） | ⏳ 跨仓库待联动 |
+| G-1..G-8 | 内容治理网关 v1（审计链 + 身份门 + 检测/混淆/拦截/全量审计） | ✅ 已完成（ADR-0004） |
+| 消费期 | 生态消费联动（旁路焊死 / Cellrix 渲染 / Anaphase D'-2 / Mind P10a） | ⏳ 跨仓库待联动 |
 
 ---
 
@@ -93,3 +117,4 @@ Tuck 接口面已全部就绪，下一阶段是**生态消费**（非 Tuck 仓�
 | 特有铁律 | DNA.md 第五节（5 条：PFP 只读/fail-closed/凭证/审计/无分配） |
 | CI-144 协议家族 | PFP-xCF14（4字节冻结）+ SAP-xCF14（28字节演进），非 24 字节 PAL |
 | 状态流接口 | status.rs：StatusProvider（summary + recent_decisions） |
+| 内容治理 | ADR-0004：全量过门 + 三表政策 + 判字符串不判含义 + 混淆态入链 |

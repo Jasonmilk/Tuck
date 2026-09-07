@@ -5,7 +5,30 @@
 
 ---
 
-### 2026-08-29 P5 传输层集成 ✅ 完成
+### 2026-09-07 内容治理网关 v1 ✅ 完成（ADR-0004）
+
+- **事件**：G-1..G-8 全部落地 — 审计链真实兑现 P4 承诺 + 网关内容治理全链路
+- **关键决策**：
+  - 审计链 = 唯一账本（无 Vault/WAL 第二账本），每笔调用 2 条记录（request/response）
+  - Ed25519 批锚定防整链重写（min_anchors 下限）；密钥缺失降级纯哈希链（按需加载）
+  - 三表 = 政策维度（mapping=pass+redact / guard=block+alert / hold=hold+alert），矩阵正交 fail-closed
+  - 目的地分级：本地卫生（永不 block）/ 外网全拦；旁路焊死为架构铁律（D7）
+  - 混淆态入链 + 映射表驻内存（Rosetta 规则）；demap_miss 不吞不拦打标
+  - 判字符串不判含义（客观谓词检测，永不含义级审查）
+  - 身份门 Bearer fail-closed（无密钥 = 拒绝一切）
+  - 中文按字节熵误报修正：高熵检测限定连续 ASCII 段
+  - SSE 流式 demap 滚动 carry（占位符跨 chunk 不损坏）；流结束写 response 审计
+- **代码实现**：
+  - `crates/tuck-audit/`：通用链（AuditRecord/Clock/verify_chain/verify_anchors，11 tests）
+  - `crates/tuck-gateway/`：proxy（骨架）+ policy（检测引擎）+ matrix（政策矩阵）+ redact（映射表）+ gov（全链路接线，38 tests）
+  - feature 门控按需加载：`audit`（tuck-audit 可选依赖）、`policy`、`redact`；gov gate 在 policy+redact
+  - 链文件 0600；seq 从文件尾恢复（崩溃续写，确定性 id 不用 UUID）
+- **测试结果**：365 个测试全部通过（316 core + 11 audit + 38 gateway），0 failure，0 warning
+- **核心承诺**：承诺 4（不可篡改记录）从蓝图升级为真实兑现（SHA-256 链 + Ed25519 锚定 + 篡改/删行/重排/整链重写全检测）
+- **六大工程原则**：全部体现（极致解耦：audit 是通用链、策略词汇不污染账本 / 按需加载：feature 门控 / 按需驱动：检测仅命中时 redact、密钥缺失降级 / 极致复用：axum/reqwest/ed25519-dalek / 物理事实优先：本地流量同样入账、token 流已发出不可拦 / 确定性优先：canonical JSON 定序哈希、会话级确定性占位符）
+- **健康度**：365 tests + 6 crates（core/audit/gateway/cli）+ 3 feature 门控
+- **版本**：v0.9.0（内容治理网关 v1）
+
 
 - **事件**：P5 传输层集成 — CI-144 帧解析器 + HTTP 拦截器 + 出网凭证注入集成 + 性能压测
 - **关键决策**：

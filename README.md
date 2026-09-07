@@ -57,10 +57,36 @@ Run benchmarks: `cargo bench -p tuck-core`
 
 - **P6-T5 status flow (ADR-0003)**: `StatusProvider` pull-mode query interface (`summary()` real-time cumulative snapshot + `recent_decisions()` recent-event projection), aggregating Metrics atomic counters + reusing the P4 audit chain, zero new storage/write paths — the window for the Cellrix display layer
 
+- **Content governance gateway (ADR-0004)**: Tuck is now the **single door for all LLM traffic** (local + external). Every call passes: identity gate (bearer, fail-closed) → detection (dict/regex/entropy rules) → policy matrix (`{pass/block/hold} × {transform} × {alert}`, destination-tiered) → optional redaction (session-scoped entity→placeholder mapping, in-memory only) → forward → demap on the way back (JSON + SSE with rolling carry). Every call lands in the tamper-evident ledger: `request` record (destination/action/transform/categories/redactions) + `response` record (status/demap_miss), linked by caller `trace_id`. **The chain stores redacted form only — original entities never touch the ledger.** Anchored by batched Ed25519 signatures so a full rewrite of the chain is detectable. Tuck judges strings, never meaning.
+
+## Gateway Usage
+
+```bash
+# Build with governance features
+cargo build -p tuck-gateway --features "policy redact audit"
+
+# Run the audit tests alone
+cargo test -p tuck-audit --features anchor
+
+# Run the full gateway suite
+cargo test -p tuck-gateway --features "policy redact audit"
+```
+
+Gateway wiring (library consumers):
+
+```rust
+use tuck_gateway::{governance_router, GatewayState, AuthConfig, policy::RuleSet, matrix::PolicyMatrix};
+
+let chain = tuck_audit::AuditChain::open("audit.jsonl")?;
+let state = GatewayState::new("http://127.0.0.1:8080/v1").with_chain(chain);
+let router = governance_router(state, rules, PolicyMatrix::default(), AuthConfig { api_key: Some("...".into()) });
+// axum::serve(listener, router).await?;
+```
+
 ## Test Coverage
 
 ```
-316 tests passed, 0 failed
+365 tests passed, 0 failed
 ├── 28 PFP/decision tests (incl. ≥12 fault-injection categories, 100% Reject)
 ├── 27 SAP optional enhancement tests (replay detection/signature verification/LRU cache/decide_with_sap)
 ├── 6 status-flow tests (StatusProvider: summary aggregation/recent reverse projection/empty log/truncation/disabled)
@@ -86,6 +112,22 @@ Run benchmarks: `cargo bench -p tuck-core`
 ├── 9 structured log tests (level validation/initialization/format/macros)
 ├── 13 monitoring metrics tests (decision/risk/latency/credential/audit/SAP/plugin/errors/Prometheus format)
 └── 10 health check tests (status/serialization/components/metrics/audit-chain failure)
+```
+
+### Content Governance Gateway (ADR-0004, new)
+
+```
+tuck-audit (11 tests)
+├── 7 chain tests (append/round-trip/deterministic hashing/tail recovery/tamper: modify/delete/reorder)
+└── 4 anchor tests (batched Ed25519/signature verify/full-rewrite rejection/wrong-key rejection)
+tuck-gateway (38 tests)
+├── 4 proxy tests (JSON round-trip/SSE passthrough/auth forward/502)
+├── 6 policy engine tests (dict/regex/entropy rules/category/hit spans)
+├── 5 policy matrix tests (pass-block-hold precedence/transform/destination tiers/fail-closed)
+├── 7 redaction table tests (deterministic placeholder/session scope/redact/demap/demap_miss)
+├── 4 governance pipeline tests (mapping redacted/guard blocked/local hygiene/demap restore)
+├── 3 identity gate tests (no key denied/wrong key denied/fail-closed unconfigured)
+└── 4 audit integration tests (trace_id joins ledgers/redacted-only chain/unauthorized/audit test)
 ```
 
 Run tests: `cargo test --workspace`
