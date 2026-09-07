@@ -22,6 +22,7 @@ reqwest.workspace = true
 futures-util.workspace = true
 tracing.workspace = true
 tuck-audit = { path = "../tuck-audit" }
+regex = "1.13.1"
 
 [dev-dependencies]
 tower = "0.5.3"

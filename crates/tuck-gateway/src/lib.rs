@@ -30,6 +30,12 @@ use axum::routing::post;
 use axum::{Json, Router};
 use serde_json::Value;
 
+/// Detection engine (feature `policy`): objective predicates over payloads.
+#[cfg(feature = "policy")]
+pub mod policy;
+#[cfg(feature = "policy")]
+pub use policy::{Category, Hit, Kind, Rule, RuleSet};
+
 /// Gateway configuration — no magic constants, everything injected.
 #[derive(Debug, Clone)]
 pub struct GatewayConfig {
