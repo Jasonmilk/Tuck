@@ -11,6 +11,9 @@ default = []
 policy = []
 # Semantic redaction (entity → placeholder mapping table).
 redact = []
+# Audit chain integration: every governed call lands in the tamper-evident
+# ledger (request decision + response outcome, linked by trace id).
+audit = ["dep:tuck-audit"]
 
 [dependencies]
 thiserror.workspace = true
@@ -21,7 +24,7 @@ axum.workspace = true
 reqwest.workspace = true
 futures-util.workspace = true
 tracing.workspace = true
-tuck-audit = { path = "../tuck-audit" }
+tuck-audit = { path = "../tuck-audit", optional = true }
 regex = "1.13.1"
 
 [dev-dependencies]

@@ -47,12 +47,23 @@ use crate::redact::MappingTable;
 /// Default session when the header is absent.
 const DEFAULT_SESSION: &str = "default";
 
+/// Governance runtime config — injected, never hardcoded.
+#[derive(Debug, Clone, Default)]
+pub struct AuthConfig {
+    /// Required bearer token. `None` = fail-closed (deny all), matching
+    /// the Tuck philosophy: no credential configured ⇒ no access.
+    pub api_key: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct GatewayState {
     pub client: reqwest::Client,
     pub upstream: String,
     /// Session id → mapping table. In-memory only (Rosetta stone rule).
     pub tables: Arc<Mutex<HashMap<String, MappingTable>>>,
+    /// Tamper-evident ledger for every governed call (feature `audit`).
+    #[cfg(feature = "audit")]
+    pub chain: Option<Arc<Mutex<tuck_audit::AuditChain>>>,
 }
 
 impl GatewayState {
@@ -65,7 +76,16 @@ impl GatewayState {
             client,
             upstream,
             tables: Arc::new(Mutex::new(HashMap::new())),
+            #[cfg(feature = "audit")]
+            chain: None,
         }
+    }
+
+    /// Attach the audit chain (feature `audit`).
+    #[cfg(feature = "audit")]
+    pub fn with_chain(mut self, chain: tuck_audit::AuditChain) -> Self {
+        self.chain = Some(Arc::new(Mutex::new(chain)));
+        self
     }
 
     fn session_table(&self, session: &str) -> std::sync::MutexGuard<'_, HashMap<String, MappingTable>> {
@@ -80,11 +100,13 @@ pub fn governance_router(
     state: Arc<GatewayState>,
     rules: RuleSet,
     matrix: PolicyMatrix,
+    auth: AuthConfig,
 ) -> Router {
     let pipeline = Arc::new(Pipeline {
         state,
         rules,
         matrix,
+        auth,
     });
     Router::new()
         .route("/v1/chat/completions", axum::routing::post(governed_chat))
@@ -95,6 +117,20 @@ pub struct Pipeline {
     pub state: Arc<GatewayState>,
     pub rules: RuleSet,
     pub matrix: PolicyMatrix,
+    pub auth: AuthConfig,
+}
+
+/// Identity gate (T-C1): bearer token required. Fail-closed — an unconfigured
+/// or mismatched key denies the call before governance even runs.
+fn authorized(headers: &HeaderMap, auth: &AuthConfig) -> bool {
+    match &auth.api_key {
+        Some(key) => headers
+            .get("authorization")
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.strip_prefix("Bearer ").unwrap_or(v) == key.as_str())
+            .unwrap_or(false),
+        None => false,
+    }
 }
 
 fn session_of(headers: &HeaderMap) -> String {
@@ -118,6 +154,25 @@ fn destination_of(headers: &HeaderMap) -> Destination {
     }
 }
 
+/// Append one audit entry (feature `audit`); no-op without it (按需加载).
+fn record(p: &Pipeline, kind: &str, trace_id: &str, payload: serde_json::Value) {
+    #[cfg(feature = "audit")]
+    {
+        if let Some(chain) = &p.state.chain {
+            if let Ok(mut chain) = chain.lock() {
+                let entry = json!({
+                    "kind": kind,
+                    "trace_id": trace_id,
+                    "data": payload,
+                });
+                let _ = chain.append(&tuck_audit::SystemClock, entry);
+            }
+        }
+    }
+    #[cfg(not(feature = "audit"))]
+    let _ = (p, kind, trace_id, payload);
+}
+
 /// Govern one request/response round trip.
 pub async fn governed_chat(
     State(p): State<Arc<Pipeline>>,
@@ -127,7 +182,26 @@ pub async fn governed_chat(
     let session = session_of(&headers);
     let dest = destination_of(&headers);
 
+    // Identity gate first: no credential, no access (fail-closed).
+    if !authorized(&headers, &p.auth) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({
+                "error": { "type": "unauthorized", "message": "missing or invalid credential" }
+            })),
+        )
+            .into_response();
+    }
+
+    // Trace id links this call across ledgers (Anaphase {job_id}#{index}).
+    let trace_id = headers
+        .get("x-tuck-trace")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("local")
+        .to_string();
+
     // Per-message governance. Messages is an array of {role, content}.
+    let mut governance: Vec<serde_json::Value> = Vec::new();
     if let Some(messages) = body.get("messages").and_then(Value::as_array) {
         let mut governed = Vec::with_capacity(messages.len());
         for msg in messages {
@@ -138,6 +212,12 @@ pub async fn governed_chat(
             let v = decide(content, &p.rules, &p.matrix, dest);
             match v.action {
                 crate::matrix::Action::Block => {
+                    record(&p, "request", &trace_id, json!({
+                        "destination": dest,
+                        "action": "block",
+                        "categories": v.categories,
+                        "session": session,
+                    }));
                     return (
                         StatusCode::FORBIDDEN,
                         Json(json!({
@@ -151,6 +231,12 @@ pub async fn governed_chat(
                         .into_response();
                 }
                 crate::matrix::Action::Hold => {
+                    record(&p, "request", &trace_id, json!({
+                        "destination": dest,
+                        "action": "hold",
+                        "categories": v.categories,
+                        "session": session,
+                    }));
                     return (
                         StatusCode::CONFLICT,
                         Json(json!({
@@ -165,20 +251,38 @@ pub async fn governed_chat(
                 }
                 _ => {}
             }
+            governance.push(serde_json::json!({
+                "destination": dest,
+                "action": "pass",
+                "transform": v.transform,
+                "categories": v.categories,
+            }));
             // Redact when the matrix asks for it (external mapping hits).
             if v.transform == Transform::Redact && !v.hits.is_empty() {
                 let mut msg = msg.clone();
                 let mut tables = p.state.session_table(&session);
                 let table = tables.get_mut(&session).expect("table just inserted");
-                let (redacted, _repls) = table.redact(content, &v.hits);
+                let (redacted, repls) = table.redact(content, &v.hits);
                 msg["content"] = json!(redacted);
                 governed.push(msg);
+                // Placeholders only — safe for the audit chain.
+                governance.last_mut().map(|g| {
+                    g["redactions"] = json!(repls.iter().map(|r| &r.placeholder).collect::<Vec<_>>())
+                });
             } else {
                 governed.push(msg.clone());
             }
         }
         body["messages"] = json!(governed);
     }
+
+    // Audit the decision before anything leaves (feature `audit`).
+    record(&p, "request", &trace_id, json!({
+        "destination": dest,
+        "action": "forward",
+        "messages": governance,
+        "session": session,
+    }));
 
     // Forward to upstream.
     let upstream_url = format!("{}/chat/completions", p.state.upstream.trim_end_matches('/'));
@@ -204,13 +308,17 @@ pub async fn governed_chat(
                 // The state Arc moves into the stream (owns its tables); the
                 // lock is taken per chunk, briefly.
                 let state = p.state.clone();
+                let pipeline = p.clone();
                 let session = session.clone();
+                let trace = trace_id.clone();
                 let stream = futures_util::stream::unfold(
                     (upstream.bytes_stream(), String::new()),
                     move |(mut stream, mut carry)| {
                         // FnMut closure: capture by ref, clone per invocation.
                         let state = state.clone();
                         let session = session.clone();
+                        let pipeline = pipeline.clone();
+                        let trace = trace.clone();
                         async move {
                             use futures_util::StreamExt;
                             match stream.next().await {
@@ -233,17 +341,29 @@ pub async fn governed_chat(
                             }
                             Some(Err(e)) => Some((Err(std::io::Error::other(e)), (stream, carry))),
                             None => {
-                                // Flush the final carried bytes.
-                                if !carry.is_empty() {
+                                // Flush the final carried bytes, then close
+                                // the audit record for this call.
+                                let mut misses = 0u64;
+                                let final_chunk = if !carry.is_empty() {
                                     let demapped = {
                                         let tables = state.session_table(&session);
                                         let table = tables.get(&session).expect("table just inserted");
-                                        let (demapped, _) = table.demap(&carry);
+                                        let (demapped, m) = table.demap(&carry);
+                                        misses += m;
                                         demapped
                                     };
-                                    Some((Ok::<_, std::io::Error>(demapped.into_bytes()), (stream, String::new())))
+                                    Some(Ok::<_, std::io::Error>(demapped.into_bytes()))
                                 } else {
                                     None
+                                };
+                                record(&pipeline, "response", &trace, json!({
+                                    "status": "ok",
+                                    "demap_miss": misses,
+                                    "session": session,
+                                }));
+                                match final_chunk {
+                                    Some(c) => Some((c, (stream, String::new()))),
+                                    None => None,
                                 }
                             }
                         }
@@ -256,27 +376,43 @@ pub async fn governed_chat(
                     Ok(bytes) => {
                         // JSON demap: restore placeholders in choices content.
                         let mut resp_body: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
-                        let tables = p.state.session_table(&session);
-                        let table = tables.get(&session).expect("table just inserted");
-                        if let Some(choices) = resp_body.get_mut("choices").and_then(Value::as_array_mut) {
-                            for choice in choices {
-                                if let Some(content) = choice
-                                    .pointer_mut("/message/content")
-                                {
-                                    if let Some(s) = content.as_str() {
-                                        let (restored, _misses) = table.demap(s);
-                                        *content = json!(restored);
+                        let mut misses = 0u64;
+                        {
+                            let tables = p.state.session_table(&session);
+                            let table = tables.get(&session).expect("table just inserted");
+                            if let Some(choices) = resp_body.get_mut("choices").and_then(Value::as_array_mut) {
+                                for choice in choices {
+                                    if let Some(content) = choice
+                                        .pointer_mut("/message/content")
+                                    {
+                                        if let Some(s) = content.as_str() {
+                                            let (restored, m) = table.demap(s);
+                                            misses += m;
+                                            *content = json!(restored);
+                                        }
                                     }
                                 }
                             }
                         }
+                        record(&p, "response", &trace_id, json!({
+                            "status": status.as_u16(),
+                            "demap_miss": misses,
+                            "session": session,
+                        }));
                         (status, out_headers, Json(resp_body)).into_response()
                     }
-                    Err(e) => (
-                        StatusCode::BAD_GATEWAY,
-                        Json(Value::String(format!("upstream read error: {e}"))),
-                    )
-                        .into_response(),
+                    Err(e) => {
+                        record(&p, "response", &trace_id, json!({
+                            "status": 502,
+                            "error": format!("upstream read error: {e}"),
+                            "session": session,
+                        }));
+                        (
+                            StatusCode::BAD_GATEWAY,
+                            Json(Value::String(format!("upstream read error: {e}"))),
+                        )
+                            .into_response()
+                    }
                 }
             }
         }
@@ -337,7 +473,10 @@ mod tests {
         ])
         .unwrap();
         let matrix = PolicyMatrix::default();
-        (governance_router(state, rules, matrix), reqwest::Client::new())
+        let auth = AuthConfig {
+            api_key: Some("test-key".into()),
+        };
+        (governance_router(state, rules, matrix, auth), reqwest::Client::new())
     }
 
     #[tokio::test]
@@ -351,6 +490,7 @@ mod tests {
 
         let resp = client
             .post(format!("http://{gw_addr}/v1/chat/completions"))
+            .header("authorization", "Bearer test-key")
             .header("x-tuck-session", "s1")
             .header("x-tuck-destination", "external")
             .json(&json!({ "model": "m", "messages": [{ "role": "user", "content": "张三在开会" }] }))
@@ -374,6 +514,7 @@ mod tests {
 
         let resp = client
             .post(format!("http://{gw_addr}/v1/chat/completions"))
+            .header("authorization", "Bearer test-key")
             .header("x-tuck-destination", "external")
             .json(&json!({ "model": "m", "messages": [{ "role": "user", "content": "我的电话 13800138000" }] }))
             .send()
@@ -395,6 +536,7 @@ mod tests {
 
         let resp = client
             .post(format!("http://{gw_addr}/v1/chat/completions"))
+            .header("authorization", "Bearer test-key")
             .header("x-tuck-destination", "local")
             .json(&json!({ "model": "m", "messages": [{ "role": "user", "content": "我的电话 13800138000" }] }))
             .send()
@@ -416,6 +558,7 @@ mod tests {
 
         let resp = client
             .post(format!("http://{gw_addr}/v1/chat/completions"))
+            .header("authorization", "Bearer test-key")
             .header("x-tuck-session", "s2")
             .header("x-tuck-destination", "external")
             .json(&json!({ "model": "m", "messages": [{ "role": "user", "content": "张三在开会" }] }))
@@ -425,5 +568,160 @@ mod tests {
         let v: Value = resp.json().await.unwrap();
         // First request established P_00 ↔ 张三 in session s2.
         assert_eq!(v["messages"][0]["content"].as_str().unwrap(), "P_00在开会");
+    }
+}
+
+#[cfg(all(test, feature = "audit"))]
+mod audit_tests {
+    use super::*;
+    use axum::http::StatusCode;
+    use axum::routing::post;
+    use axum::Router;
+    use serde_json::{json, Value};
+    use std::path::PathBuf;
+
+    fn mock_upstream() -> Router {
+        Router::new().route(
+            "/v1/chat/completions",
+            post(|Json(body): Json<Value>| async move { (StatusCode::OK, Json(body)) }),
+        )
+    }
+
+    #[tokio::test]
+    async fn every_call_lands_in_ledger_with_trace() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, mock_upstream()).await.unwrap();
+        });
+
+        let chain_path = PathBuf::from(std::env::temp_dir()).join("tuck-gov-audit-test.jsonl");
+        let _ = std::fs::remove_file(&chain_path);
+        let chain = tuck_audit::AuditChain::open(&chain_path).unwrap();
+
+        let state = Arc::new(
+            GatewayState::new(format!("http://{addr}/v1"))
+                .with_chain(chain),
+        );
+        let rules = RuleSet::compile(&[crate::policy::Rule {
+            id: "person".into(),
+            kind: crate::policy::Kind::Dict,
+            category: crate::policy::Category::Mapping,
+            pattern: None,
+            words: Some("张三".into()),
+            min_len: None,
+            min_entropy: None,
+        }])
+        .unwrap();
+        let router = governance_router(
+            state,
+            rules,
+            PolicyMatrix::default(),
+            AuthConfig { api_key: Some("k".into()) },
+        );
+        let gw = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let gw_addr = gw.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(gw, router).await.unwrap();
+        });
+
+        let client = reqwest::Client::new();
+        let resp = client
+            .post(format!("http://{gw_addr}/v1/chat/completions"))
+            .header("authorization", "Bearer k")
+            .header("x-tuck-trace", "job7#3")
+            .header("x-tuck-session", "audit-s")
+            .header("x-tuck-destination", "external")
+            .json(&json!({ "model": "m", "messages": [{ "role": "user", "content": "张三在开会" }] }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // Ledger has request + response entries, chain intact.
+        let report = tuck_audit::verify_chain(&chain_path).unwrap();
+        assert!(report.ok, "ledger must stay tamper-evident");
+        assert_eq!(report.entries, 2, "one call = request + response records");
+
+        let content = std::fs::read_to_string(&chain_path).unwrap();
+        assert!(content.contains("job7#3"), "trace id must join ledgers");
+        assert!(content.contains("\"kind\":\"request\""));
+        assert!(content.contains("\"kind\":\"response\""));
+        // Redacted form only — original entity never in the chain.
+        assert!(!content.contains("张三"), "audit chain stores redacted form only");
+        assert!(content.contains("P_00") || content.contains("placeholder") || content.contains("redactions"));
+    }
+
+    #[tokio::test]
+    async fn unauthorized_denied_without_credential() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, mock_upstream()).await.unwrap();
+        });
+        let state = Arc::new(GatewayState::new(format!("http://{addr}/v1")));
+        let router = governance_router(
+            state,
+            RuleSet::compile(&[]).unwrap(),
+            PolicyMatrix::default(),
+            AuthConfig { api_key: Some("k".into()) },
+        );
+        let gw = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let gw_addr = gw.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(gw, router).await.unwrap();
+        });
+
+        let client = reqwest::Client::new();
+        // No Authorization header at all.
+        let resp = client
+            .post(format!("http://{gw_addr}/v1/chat/completions"))
+            .json(&json!({ "model": "m", "messages": [] }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        // Wrong key also denied.
+        let resp = client
+            .post(format!("http://{gw_addr}/v1/chat/completions"))
+            .header("authorization", "Bearer wrong")
+            .json(&json!({ "model": "m", "messages": [] }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn fail_closed_when_no_key_configured() {
+        // AuthConfig::default() has no key → deny everything.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, mock_upstream()).await.unwrap();
+        });
+        let state = Arc::new(GatewayState::new(format!("http://{addr}/v1")));
+        let router = governance_router(
+            state,
+            RuleSet::compile(&[]).unwrap(),
+            PolicyMatrix::default(),
+            AuthConfig::default(),
+        );
+        let gw = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let gw_addr = gw.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(gw, router).await.unwrap();
+        });
+
+        let client = reqwest::Client::new();
+        let resp = client
+            .post(format!("http://{gw_addr}/v1/chat/completions"))
+            .header("authorization", "Bearer anything")
+            .json(&json!({ "model": "m", "messages": [] }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     }
 }

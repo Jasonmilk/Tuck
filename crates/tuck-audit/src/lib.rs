@@ -176,6 +176,14 @@ impl AuditChain {
             .append(true)
             .open(path)?;
 
+        // The ledger is a sensitive asset: restrict to owner rw on Unix
+        // (0600) so other local users cannot read the records.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+        }
+
         let (next_seq, tail_hash) = scan_tail(&mut file)?;
         Ok(AuditChain {
             file,
