@@ -1,7 +1,7 @@
 # Tuck 开发导航牌（PLAN）
 
 > **版本**：v1.1.0（旁路焊死装配，2026-09-07）
-> **状态**：✅ 内容治理 v1.2 — 网关服务装配（feature gateway）+ L2 凭证注入 + Anaphase 零改动接入 — 369 tests 全绿、--all-features 零警告；旁路已焊死
+> **状态**：✅ 内容治理 v1.2 — 网关服务装配 + L2 凭证注入 + **真实链路 live 验证达成**（deepseek 经 Tuck 之门）+ 凭证治理机制（config untrack）— 369 tests 全绿、--all-features 零警告；旁路已焊死
 > **上一阶段**：G-1..G-12 — 内容治理网关（ADR-0004）✅ 本次完成
 > **分支**：rs
 > **所属方法论**：phyt-DNA v1.0（PLAN 动态流转闭环，方法论锚点项目 https://github.com/Jasonmilk/phyt-DNA）

@@ -5,6 +5,20 @@
 
 ---
 
+### 2026-09-07 真实链路 live 验证 + 凭证治理机制 ✅（ADR-0004 D12 收口）
+
+- **事件**：①Anaphase reasoning_endpoint 真实切到 Tuck 网关（tk-local-gate 身份凭证，
+  真实 deepseek key 移入 Tuck config.toml，gitignored）——**live 验证达成**：真实 deepseek
+  响应经 Tuck 之门返回，审计链记录 request/response 对（dest=external，hash 链），
+  `/v1/audit` 查询可读。②**抓到一个 mock 掩盖的真伤**：workspace reqwest 为
+  default-features=false + json/stream——**无 TLS 后端**，http（mock）通、https（真实 LLM）必挂；
+  加 rustls-tls 后真实链路才通。③**API key 泄露审计**：发现真实 key 曾进 anaphase-helix
+  git 历史（60df6f8 引入，已推送 GitHub）——唯一泄露面；机制修复：Anaphase config.toml/.bak
+  untrack（部署配置永不进 git）、Tuck *.jsonl ignore；根治=用户轮换 key（待办）。
+- **验证**：live curl——无 key 401 / 带 key 真实 deepseek 响应 / 审计链双记录 / 查询 2 条。
+- **指标**：369 passed / 0 failed / 0 warnings（--all-features）。commit fc691d7（rustls）+ b4dc907/9335a7a（凭证治理）。
+- **下一步**：用户轮换 deepseek key 后更新 Tuck/config.toml upstream_key；Cellrix 轨迹视图消费 /v1/audit。
+
 ### 2026-09-07 内容治理 v1.1 + 零警告专项 ✅（ADR-0004 + D11）
 
 - **事件**：①零警告专项：tuck-core 47 个 warning 全清（Debug 补全 / 缺 doc / unused import / 类型极限比较），
