@@ -53,6 +53,20 @@ pub struct AuthConfig {
     /// Required bearer token. `None` = fail-closed (deny all), matching
     /// the Tuck philosophy: no credential configured ⇒ no access.
     pub api_key: Option<String>,
+    /// Session-token secret (JWT HS256). When set, `Authorization: Bearer
+    /// <jwt>` is validated (signature + expiry) and its `scope` claim is
+    /// forwarded into the audit trail (CAPABILITY-13 mode-scope carrier).
+    pub jwt_secret: Option<String>,
+}
+
+/// Verified caller identity after the auth gate.
+#[derive(Debug, Clone)]
+pub struct Caller {
+    /// Static-key path: the configured key id.
+    pub api_key_id: Option<String>,
+    /// JWT path: subject + mode scope (opaque label, never interpreted).
+    pub sub: Option<String>,
+    pub scope: Option<String>,
 }
 
 #[derive(Clone)]
@@ -108,9 +122,11 @@ pub fn governance_router(
         matrix,
         auth,
     });
-    Router::new()
-        .route("/v1/chat/completions", axum::routing::post(governed_chat))
-        .with_state(pipeline)
+    let router = Router::new()
+        .route("/v1/chat/completions", axum::routing::post(governed_chat));
+    #[cfg(feature = "audit")]
+    let router = router.route("/v1/audit", axum::routing::get(audit_query));
+    router.with_state(pipeline)
 }
 
 pub struct Pipeline {
@@ -120,16 +136,40 @@ pub struct Pipeline {
     pub auth: AuthConfig,
 }
 
-/// Identity gate (T-C1): bearer token required. Fail-closed — an unconfigured
-/// or mismatched key denies the call before governance even runs.
-fn authorized(headers: &HeaderMap, auth: &AuthConfig) -> bool {
+/// Identity gate (T-C1): bearer credential required. Fail-closed — an
+/// unconfigured or mismatched credential denies the call before governance
+/// even runs. Two channels: static key (system-level) and JWT HS256
+/// (session-level, carries the CAPABILITY-13 mode scope).
+fn authenticate(headers: &HeaderMap, auth: &AuthConfig) -> Result<Caller, ()> {
+    let token = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "));
+    let Some(token) = token else {
+        return Err(());
+    };
+    // JWT channel first (session identity + scope).
+    if let Some(secret) = &auth.jwt_secret {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        if let Ok(claims) = crate::token::verify(token, secret.as_bytes(), now) {
+            return Ok(Caller {
+                api_key_id: None,
+                sub: Some(claims.sub),
+                scope: Some(claims.scope),
+            });
+        }
+    }
+    // Static key channel (system-level).
     match &auth.api_key {
-        Some(key) => headers
-            .get("authorization")
-            .and_then(|v| v.to_str().ok())
-            .map(|v| v.strip_prefix("Bearer ").unwrap_or(v) == key.as_str())
-            .unwrap_or(false),
-        None => false,
+        Some(key) if token == key.as_str() => Ok(Caller {
+            api_key_id: Some("system".into()),
+            sub: None,
+            scope: None,
+        }),
+        _ => Err(()),
     }
 }
 
@@ -152,6 +192,99 @@ fn destination_of(headers: &HeaderMap) -> Destination {
         Some("local") => Destination::Local,
         _ => Destination::External,
     }
+}
+
+/// Read-only audit query endpoint (feature `audit`).
+///
+/// Returns chain entries filtered by optional query params:
+/// `trace_id` (exact), `kind` (request|response), `action` (block|hold|forward).
+/// Requires a valid credential (identity gate, fail-closed). Reads the chain
+/// file directly — never touches the in-memory hot path.
+#[cfg(feature = "audit")]
+async fn audit_query(
+    State(p): State<Arc<Pipeline>>,
+    headers: axum::http::HeaderMap,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> axum::response::Response {
+    use axum::Json;
+    let caller = match authenticate(&headers, &p.auth) {
+        Ok(c) => c,
+        Err(()) => {
+            return (
+                axum::http::StatusCode::UNAUTHORIZED,
+                Json(json!({
+                    "error": { "type": "unauthorized", "message": "missing or invalid credential" }
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let path = match p.state.chain.as_ref() {
+        Some(chain) => chain.lock().unwrap().path().to_path_buf(),
+        None => {
+            return (
+                axum::http::StatusCode::NOT_FOUND,
+                Json(json!({ "error": { "type": "no_audit_chain", "message": "audit chain not configured" } })),
+            )
+                .into_response();
+        }
+    };
+
+    let trace_filter = params.get("trace_id").cloned();
+    let kind_filter = params.get("kind").cloned();
+    let action_filter = params.get("action").cloned();
+
+    let mut entries: Vec<serde_json::Value> = Vec::new();
+    if let Ok(content) = std::fs::read_to_string(&path) {
+        for line in content.lines() {
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+            let payload = v.get("payload");
+            if let Some(t) = &trace_filter {
+                if payload.and_then(|p| p.get("trace_id")).and_then(serde_json::Value::as_str)
+                    != Some(t.as_str())
+                {
+                    continue;
+                }
+            }
+            if let Some(k) = &kind_filter {
+                if payload.and_then(|p| p.get("kind")).and_then(serde_json::Value::as_str)
+                    != Some(k.as_str())
+                {
+                    continue;
+                }
+            }
+            if let Some(a) = &action_filter {
+                if v.get("payload").and_then(|p| p.get("action")).and_then(serde_json::Value::as_str)
+                    != Some(a.as_str())
+                {
+                    continue;
+                }
+            }
+            entries.push(v);
+        }
+    }
+    let count = entries.len();
+    (
+        axum::http::StatusCode::OK,
+        Json(json!({ "entries": entries, "count": count, "queried_by": caller.sub.unwrap_or_default() })),
+    )
+        .into_response()
+}
+
+/// Caller identity fragment for audit entries (opaque labels only).
+fn caller_of(c: &Caller) -> serde_json::Value {
+    let mut v = serde_json::Map::new();
+    if let Some(id) = &c.api_key_id {
+        v.insert("api_key_id".into(), json!(id));
+    }
+    if let Some(sub) = &c.sub {
+        v.insert("sub".into(), json!(sub));
+    }
+    if let Some(scope) = &c.scope {
+        v.insert("scope".into(), json!(scope));
+    }
+    serde_json::Value::Object(v)
 }
 
 /// Append one audit entry (feature `audit`); no-op without it (按需加载).
@@ -183,15 +316,18 @@ pub async fn governed_chat(
     let dest = destination_of(&headers);
 
     // Identity gate first: no credential, no access (fail-closed).
-    if !authorized(&headers, &p.auth) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({
-                "error": { "type": "unauthorized", "message": "missing or invalid credential" }
-            })),
-        )
-            .into_response();
-    }
+    let caller = match authenticate(&headers, &p.auth) {
+        Ok(c) => c,
+        Err(()) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({
+                    "error": { "type": "unauthorized", "message": "missing or invalid credential" }
+                })),
+            )
+                .into_response();
+        }
+    };
 
     // Trace id links this call across ledgers (Anaphase {job_id}#{index}).
     let trace_id = headers
@@ -217,6 +353,7 @@ pub async fn governed_chat(
                         "action": "block",
                         "categories": v.categories,
                         "session": session,
+                        "caller": caller_of(&caller),
                     }));
                     return (
                         StatusCode::FORBIDDEN,
@@ -236,6 +373,7 @@ pub async fn governed_chat(
                         "action": "hold",
                         "categories": v.categories,
                         "session": session,
+                        "caller": caller_of(&caller),
                     }));
                     return (
                         StatusCode::CONFLICT,
@@ -282,6 +420,7 @@ pub async fn governed_chat(
         "action": "forward",
         "messages": governance,
         "session": session,
+        "caller": caller_of(&caller),
     }));
 
     // Forward to upstream.
@@ -311,6 +450,7 @@ pub async fn governed_chat(
                 let pipeline = p.clone();
                 let session = session.clone();
                 let trace = trace_id.clone();
+                let caller = caller_of(&caller);
                 let stream = futures_util::stream::unfold(
                     (upstream.bytes_stream(), String::new()),
                     move |(mut stream, mut carry)| {
@@ -319,6 +459,7 @@ pub async fn governed_chat(
                         let session = session.clone();
                         let pipeline = pipeline.clone();
                         let trace = trace.clone();
+                        let caller = caller.clone();
                         async move {
                             use futures_util::StreamExt;
                             match stream.next().await {
@@ -360,6 +501,7 @@ pub async fn governed_chat(
                                     "status": "ok",
                                     "demap_miss": misses,
                                     "session": session,
+                                    "caller": caller,
                                 }));
                                 match final_chunk {
                                     Some(c) => Some((c, (stream, String::new()))),
@@ -398,6 +540,7 @@ pub async fn governed_chat(
                             "status": status.as_u16(),
                             "demap_miss": misses,
                             "session": session,
+                            "caller": caller_of(&caller),
                         }));
                         (status, out_headers, Json(resp_body)).into_response()
                     }
@@ -406,6 +549,7 @@ pub async fn governed_chat(
                             "status": 502,
                             "error": format!("upstream read error: {e}"),
                             "session": session,
+                            "caller": caller_of(&caller),
                         }));
                         (
                             StatusCode::BAD_GATEWAY,
@@ -475,6 +619,7 @@ mod tests {
         let matrix = PolicyMatrix::default();
         let auth = AuthConfig {
             api_key: Some("test-key".into()),
+            jwt_secret: None,
         };
         (governance_router(state, rules, matrix, auth), reqwest::Client::new())
     }
@@ -617,7 +762,7 @@ mod audit_tests {
             state,
             rules,
             PolicyMatrix::default(),
-            AuthConfig { api_key: Some("k".into()) },
+            AuthConfig { api_key: Some("k".into()), jwt_secret: None },
         );
         let gw = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let gw_addr = gw.local_addr().unwrap();
@@ -664,7 +809,7 @@ mod audit_tests {
             state,
             RuleSet::compile(&[]).unwrap(),
             PolicyMatrix::default(),
-            AuthConfig { api_key: Some("k".into()) },
+            AuthConfig { api_key: Some("k".into()), jwt_secret: None },
         );
         let gw = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let gw_addr = gw.local_addr().unwrap();

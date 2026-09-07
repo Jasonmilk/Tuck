@@ -29,7 +29,8 @@
 use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+#[cfg(feature = "anchor")]
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -157,6 +158,8 @@ fn hex_lower(bytes: &[u8]) -> String {
 /// [`verify_chain`] but fails [`verify_anchors`] — that is the value of an
 /// external witness.
 pub struct AuditChain {
+    /// Chain file path (kept for read-back queries).
+    path: PathBuf,
     file: File,
     next_seq: u64,
     tail_hash: String,
@@ -169,6 +172,11 @@ pub struct AuditChain {
 }
 
 impl AuditChain {
+    /// Path of the chain file (read-back queries).
+    pub fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+
     /// Open (create if missing) a chain file and recover tail state.
     pub fn open(path: &Path) -> Result<Self, AuditError> {
         let mut file = OpenOptions::new()
@@ -187,6 +195,7 @@ impl AuditChain {
 
         let (next_seq, tail_hash) = scan_tail(&mut file)?;
         Ok(AuditChain {
+            path: path.to_path_buf(),
             file,
             next_seq,
             tail_hash,

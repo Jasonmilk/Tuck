@@ -43,6 +43,12 @@ async-trait = "0.1"
 # SHA-256 for audit chain
 sha2 = "0.10"
 
+# HMAC-SHA256 for session tokens (JWT HS256, no heavy JWT crate)
+hmac = "0.12"
+
+# base64url for token segments
+base64 = "0.22"
+
 # Ed25519 signature anchoring for audit chain (optional, feature-gated)
 ed25519-dalek = { version = "2" }
 

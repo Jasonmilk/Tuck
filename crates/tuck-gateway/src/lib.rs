@@ -54,6 +54,12 @@ pub mod gov;
 #[cfg(all(feature = "policy", feature = "redact"))]
 pub use gov::{GatewayState, Pipeline, governance_router};
 
+/// Session tokens (JWT HS256) — CAPABILITY-13 mode-scope carrier.
+#[cfg(all(feature = "policy", feature = "redact"))]
+pub mod token;
+#[cfg(all(feature = "policy", feature = "redact"))]
+pub use token::{Claims, TokenError, issue, verify};
+
 /// Gateway configuration — no magic constants, everything injected.
 #[derive(Debug, Clone)]
 pub struct GatewayConfig {
