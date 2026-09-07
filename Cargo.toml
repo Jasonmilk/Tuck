@@ -54,7 +54,7 @@ ed25519-dalek = { version = "2" }
 
 # Gateway: HTTP/S typing (content governance host)
 axum = { version = "0.8", features = ["json"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 futures-util = "0.3"
 
 # AES-GCM for credential encryption

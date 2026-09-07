@@ -20,3 +20,6 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# Real deployment config (contains secrets)
+config.toml
