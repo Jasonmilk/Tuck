@@ -22,8 +22,20 @@ use tower::ServiceExt;
 fn mock_upstream() -> Router {
     Router::new().route(
         "/v1/chat/completions",
-        post(|Json(body): Json<Value>| async move {
-            let reply = json!({ "echo": body, "upstream": true });
+        post(|req: axum::extract::Request| async move {
+            // Echo back the Authorization header the upstream actually saw —
+            // this is what makes L2 credential injection physically verifiable.
+            let auth = req
+                .headers()
+                .get("authorization")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("none")
+                .to_string();
+            let body: Value = axum::body::to_bytes(req.into_body(), 1024 * 64)
+                .await
+                .map(|b| serde_json::from_slice(&b).unwrap_or(Value::Null))
+                .unwrap_or(Value::Null);
+            let reply = json!({ "echo": body, "upstream": true, "saw_auth": auth });
             (StatusCode::OK, Json(reply)).into_response()
         }),
     )
@@ -58,6 +70,10 @@ fn partner_token() -> String {
 }
 
 async fn spawn() -> (Router, reqwest::Client) {
+    spawn_with_upstream_key(None).await
+}
+
+async fn spawn_with_upstream_key(upstream_key: Option<&str>) -> (Router, reqwest::Client) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -66,7 +82,11 @@ async fn spawn() -> (Router, reqwest::Client) {
     let upstream = format!("http://{addr}/v1");
     let chain_path = chain_path();
     let chain = AuditChain::open(&chain_path).unwrap();
-    let state = GatewayState::new(upstream).with_chain(chain);
+    let mut state = GatewayState::new(upstream);
+    if let Some(key) = upstream_key {
+        state = state.with_upstream_key(key.to_string());
+    }
+    let state = state.with_chain(chain);
     let auth = AuthConfig {
         api_key: Some("static-key".into()),
         jwt_secret: Some(SECRET.into()),
@@ -154,6 +174,21 @@ async fn audit_query_requires_credential() {
     let (router, _client) = spawn().await;
     let (status, _) = audit_query(&router, "", "job#0").await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn upstream_key_replaces_caller_credential_at_the_edge() {
+    // The caller only ever carries a Tuck credential; the upstream secret
+    // is injected by Tuck (L2). The upstream must never see the caller key.
+    let (router, _client) = spawn_with_upstream_key(Some("sk-upstream-secret")).await;
+    let (status, body) = governed(&router, "static-key").await;
+    assert_eq!(status, StatusCode::OK);
+    let seen = body["saw_auth"].as_str().unwrap_or("");
+    assert!(
+        !seen.contains("static-key"),
+        "caller credential leaked upstream: {seen}"
+    );
+    assert_eq!(seen, "Bearer sk-upstream-secret");
 }
 
 #[tokio::test]

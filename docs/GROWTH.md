@@ -19,6 +19,17 @@
 - **指标**：368 passed / 0 failed / 0 warnings（--all-features）。commit 505566a（feat）+ a7d3fe8（零警告）+ 1ff6b60（文档）。
 - **下一步**：Cellrix WebUI 驾驶舱轨迹视图按 trace_id join Tuck /v1/audit + Anaphase ledger（白盒可查落地）。
 
+### 2026-09-07 旁路焊死装配 ✅（ADR-0004 D12）
+
+- **事件**：Tuck 成为真实服务——`tuck` 二进制 feature `gateway`（按需加载），TuckConfig.gateway
+  段装配 governance_router 并 serve（复用 server 端口，零硬编码）。L2 凭证物理注入落地：
+  `upstream_key` 转发时替换 Authorization（调用方凭证永不离开本机，mock upstream 回显实证）。
+  **Anaphase 零代码改动接入**：reasoning_endpoint 指向 Tuck 网关 = 物理上唯一出口（D7 铁律达成）。
+- **验证**：e2e curl——无 key 401 / 带 key 200 / 上游只见 sk-upstream-secret / 审计链 e2e#1 双记录 /
+  /v1/audit 查询 2 条 / 无 key 查询 401。
+- **指标**：369 passed / 0 failed / 0 warnings（--all-features）。gateway 40（+1 L2 注入测试）。
+- **下一步**：Cellrix 驾驶舱轨迹视图按 trace_id join Tuck /v1/audit + Anaphase ledger（白盒展示落地）。
+
 ### 2026-09-07 内容治理网关 v1 ✅ 完成（ADR-0004）
 
 - **事件**：G-1..G-8 全部落地 — 审计链真实兑现 P4 承诺 + 网关内容治理全链路

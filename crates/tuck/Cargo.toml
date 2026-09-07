@@ -9,8 +9,23 @@ description = "Tuck: Helix ecosystem immune system — CI-144 PFP consumer, hard
 name = "tuck"
 path = "src/main.rs"
 
+[features]
+default = []
+# Content-governance gateway service (按需加载: only built when needed).
+gateway = [
+    "dep:tuck-gateway",
+    "dep:tuck-audit",
+    "dep:axum",
+    "tuck-gateway/policy",
+    "tuck-gateway/redact",
+    "tuck-gateway/audit",
+]
+
 [dependencies]
 tuck-core = { path = "../tuck-core" }
+tuck-gateway = { path = "../tuck-gateway", optional = true }
+tuck-audit = { path = "../tuck-audit", optional = true }
+axum = { workspace = true, optional = true }
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

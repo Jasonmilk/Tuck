@@ -59,20 +59,41 @@ Run benchmarks: `cargo bench -p tuck-core`
 
 - **Content governance gateway (ADR-0004)**: Tuck is now the **single door for all LLM traffic** (local + external). Every call passes: identity gate (bearer, fail-closed) → detection (dict/regex/entropy rules) → policy matrix (`{pass/block/hold} × {transform} × {alert}`, destination-tiered) → optional redaction (session-scoped entity→placeholder mapping, in-memory only) → forward → demap on the way back (JSON + SSE with rolling carry). Every call lands in the tamper-evident ledger: `request` record (destination/action/transform/categories/redactions) + `response` record (status/demap_miss), linked by caller `trace_id`. **The chain stores redacted form only — original entities never touch the ledger.** Anchored by batched Ed25519 signatures so a full rewrite of the chain is detectable. Tuck judges strings, never meaning.
 
-## Gateway Usage
+## Gateway Service (the only door)
 
-```bash
-# Build with governance features
-cargo build -p tuck-gateway --features "policy redact audit"
+The `tuck` binary assembles the governance gateway (feature `gateway`, 按需加载).
+Everything is injected from `TuckConfig.gateway` — no hardcoded values:
 
-# Run the audit tests alone
-cargo test -p tuck-audit --features anchor
+```toml
+[server]
+host = "127.0.0.1"
+port = 60052
 
-# Run the full gateway suite
-cargo test -p tuck-gateway --features "policy redact audit"
+[gateway]
+enabled = true
+upstream = "http://127.0.0.1:8000/v1"   # the real LLM endpoint
+upstream_key = "sk-..."                  # L2: injected at the physical edge
+api_key = "tk-local-gate"                # identity gate (fail-closed)
+jwt_secret = ""                          # optional JWT HS256 channel
+audit_path = "/var/tuck/audit.jsonl"     # tamper-evident ledger
+rules_path = ""                          # detection rules JSON (optional)
 ```
 
-Gateway wiring (library consumers):
+```bash
+cargo run --bin tuck --features gateway -- --config tuck.toml
+```
+
+Point any OpenAI-compatible client at `http://127.0.0.1:60052/v1` with
+`Authorization: Bearer tk-local-gate`. The gateway governs the traffic,
+replaces the credential with `upstream_key` before leaving the machine,
+and writes every call (request + response, trace_id-linked) to the audit
+chain. Read it back: `GET /v1/audit?trace_id=...` (same credential).
+
+Anaphase wiring (zero code change): set `reasoning_endpoint` to the gateway
+and `reasoning_api_key` to a Tuck credential — the traffic physically
+cannot bypass Tuck (ADR-0004 D7/D12).
+
+Library wiring (embedded consumers):
 
 ```rust
 use tuck_gateway::{governance_router, GatewayState, AuthConfig, policy::RuleSet, matrix::PolicyMatrix};
@@ -86,7 +107,7 @@ let router = governance_router(state, rules, PolicyMatrix::default(), AuthConfig
 ## Test Coverage
 
 ```
-368 tests passed, 0 failed
+369 tests passed, 0 failed
 ├── 28 PFP/decision tests (incl. ≥12 fault-injection categories, 100% Reject)
 ├── 27 SAP optional enhancement tests (replay detection/signature verification/LRU cache/decide_with_sap)
 ├── 6 status-flow tests (StatusProvider: summary aggregation/recent reverse projection/empty log/truncation/disabled)
@@ -120,7 +141,7 @@ let router = governance_router(state, rules, PolicyMatrix::default(), AuthConfig
 tuck-audit (11 tests)
 ├── 7 chain tests (append/round-trip/deterministic hashing/tail recovery/tamper: modify/delete/reorder)
 └── 4 anchor tests (batched Ed25519/signature verify/full-rewrite rejection/wrong-key rejection)
-tuck-gateway (41 tests)
+tuck-gateway (40 tests)
 ├── 4 proxy tests (JSON round-trip/SSE passthrough/auth forward/502)
 ├── 6 policy engine tests (dict/regex/entropy rules/category/hit spans)
 ├── 5 policy matrix tests (pass-block-hold precedence/transform/destination tiers/fail-closed)
@@ -128,7 +149,8 @@ tuck-gateway (41 tests)
 ├── 4 governance pipeline tests (mapping redacted/guard blocked/local hygiene/demap restore)
 ├── 3 identity gate tests (no key denied/wrong key denied/fail-closed unconfigured)
 ├── 6 session token tests (round-trip/expiry/wrong secret/tamper/alg pin/deterministic)
-└── 3 audit query integration tests (JWT scope in audit/trace_id pair/credential required)
+├── 3 audit query integration tests (JWT scope in audit/trace_id pair/credential required)
+└── 1 edge-injection test (L2: upstream_key replaces caller credential)
 ```
 ```
 

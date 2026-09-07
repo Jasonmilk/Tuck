@@ -73,6 +73,10 @@ pub struct Caller {
 pub struct GatewayState {
     pub client: reqwest::Client,
     pub upstream: String,
+    /// Upstream credential injected at the physical edge (L2). When set, the
+    /// caller's Authorization is replaced before leaving the machine — the
+    /// caller only ever carries a Tuck credential, never the upstream secret.
+    pub upstream_key: Option<String>,
     /// Session id → mapping table. In-memory only (Rosetta stone rule).
     pub tables: Arc<Mutex<HashMap<String, MappingTable>>>,
     /// Tamper-evident ledger for every governed call (feature `audit`).
@@ -89,10 +93,17 @@ impl GatewayState {
         Self {
             client,
             upstream,
+            upstream_key: None,
             tables: Arc::new(Mutex::new(HashMap::new())),
             #[cfg(feature = "audit")]
             chain: None,
         }
+    }
+
+    /// Inject the upstream credential (L2 physical-edge injection).
+    pub fn with_upstream_key(mut self, key: String) -> Self {
+        self.upstream_key = Some(key);
+        self
     }
 
     /// Attach the audit chain (feature `audit`).
@@ -426,9 +437,19 @@ pub async fn governed_chat(
     // Forward to upstream.
     let upstream_url = format!("{}/chat/completions", p.state.upstream.trim_end_matches('/'));
     let mut req = p.state.client.post(&upstream_url);
-    if let Some(auth) = headers.get("authorization") {
-        if let Ok(v) = auth.to_str() {
-            req = req.header("authorization", v);
+    match &p.state.upstream_key {
+        // L2: upstream credential injected at the physical edge — the caller
+        // credential never leaves the machine.
+        Some(key) => {
+            req = req.header("authorization", format!("Bearer {key}"));
+        }
+        // No upstream credential configured: transparent passthrough.
+        None => {
+            if let Some(auth) = headers.get("authorization") {
+                if let Ok(v) = auth.to_str() {
+                    req = req.header("authorization", v);
+                }
+            }
         }
     }
     req = req.header("content-type", "application/json");

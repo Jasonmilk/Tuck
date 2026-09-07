@@ -91,6 +91,10 @@ pub struct TuckConfig {
     #[serde(default)]
     pub server: ServerConfig,
 
+    /// Content-governance gateway service (feature `gateway`, 按需加载).
+    #[serde(default)]
+    pub gateway: GatewayConfig,
+
     /// Security policy configuration.
     #[serde(default)]
     pub security: SecurityConfig,
@@ -124,6 +128,7 @@ impl Default for TuckConfig {
     fn default() -> Self {
         Self {
             server: ServerConfig::default(),
+            gateway: GatewayConfig::default(),
             security: SecurityConfig::default(),
             audit: AuditConfig::default(),
             credential: CredentialConfig::default(),
@@ -273,6 +278,50 @@ impl TuckConfig {
 // ============================================================================
 // Server Configuration
 // ============================================================================
+
+/// Content-governance gateway service configuration (feature `gateway`).
+///
+/// Every LLM traffic gate in the ecosystem is assembled here: Tuck is the
+/// only door. Listen host/port reuse `server` (single service port, 极致复用).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GatewayConfig {
+    /// Serve the governance gateway on startup.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Upstream OpenAI-compatible base URL (the real LLM endpoint).
+    #[serde(default)]
+    pub upstream: String,
+    /// Upstream credential injected at the physical edge (L2: replace the
+    /// caller's Authorization header before leaving the machine).
+    #[serde(default)]
+    pub upstream_key: String,
+    /// Tuck identity-gate static key (fail-closed: empty = deny all).
+    #[serde(default)]
+    pub api_key: String,
+    /// Session-token secret (JWT HS256, optional second identity channel).
+    #[serde(default)]
+    pub jwt_secret: String,
+    /// Tamper-evident audit chain file path (feature `audit`).
+    #[serde(default)]
+    pub audit_path: String,
+    /// Detection rules JSON file path (array of `Rule`). Empty = no rules.
+    #[serde(default)]
+    pub rules_path: String,
+}
+
+impl Default for GatewayConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            upstream: String::new(),
+            upstream_key: String::new(),
+            api_key: String::new(),
+            jwt_secret: String::new(),
+            audit_path: String::new(),
+            rules_path: String::new(),
+        }
+    }
+}
 
 /// Server configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]

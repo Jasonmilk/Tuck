@@ -100,6 +100,18 @@ Anaphase → FlowModus（调度：选 endpoint/模型）
   身份门拦截（fail-closed）。直接读链文件——不触碰内存热路径。WebUI 驾驶舱
   轨迹视图按 trace_id join Tuck 审计链 + Anaphase ledger 的数据源（D9 落地）。
 
+### D12: 旁路焊死装配——网关服务 + L2 凭证注入（2026-09-07 落地）
+- `tuck` 二进制新增 feature `gateway`（按需加载）：`TuckConfig.gateway` 段装配
+  governance_router 并 serve（复用 `server.host/port`，零新端口字段）。监听、
+  上游、凭证、审计路径、规则文件全部注入自 config——零硬编码。
+- **L2 凭证物理注入落地**：`GatewayState.upstream_key`——转发上游时**替换**
+  Authorization 为上游真实凭证，调用方凭证（Tuck 身份 key / JWT）**永不离开本机**。
+  物理事实验证：mock upstream 回显所见 auth = `Bearer sk-upstream-secret`
+  （非调用方 key），e2e curl 实证。
+- **Anaphase 零代码改动接入**：`reasoning_endpoint` 指向 Tuck 网关
+  （`http://127.0.0.1:<port>/v1`）、`reasoning_api_key` = Tuck 身份凭证——
+  物理上唯一出口（D7 架构铁律达成）。配置即接线，无旁路代码。
+
 ## 3. 备选方案与拒绝理由
 | 备选 | 拒绝理由 |
 |---|---|
