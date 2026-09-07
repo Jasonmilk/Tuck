@@ -1,0 +1,19 @@
+[package]
+name = "tuck-audit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Tuck tamper-evident audit chain — generic append-only ledger with SHA-256 hash chaining"
+
+[features]
+default = []
+# Ed25519 chain-head signing anchoring (loaded only when demanded).
+anchor = ["dep:ed25519-dalek", "dep:base64"]
+
+[dependencies]
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+ed25519-dalek = { workspace = true, optional = true }
+base64 = { version = "0.22", optional = true }

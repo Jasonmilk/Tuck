@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/tuck-core",
+    "crates/tuck-audit",
     "crates/tuck",
 ]
 
@@ -40,6 +41,9 @@ async-trait = "0.1"
 
 # SHA-256 for audit chain
 sha2 = "0.10"
+
+# Ed25519 signature anchoring for audit chain (optional, feature-gated)
+ed25519-dalek = { version = "2" }
 
 # AES-GCM for credential encryption
 aes-gcm = "0.10"
