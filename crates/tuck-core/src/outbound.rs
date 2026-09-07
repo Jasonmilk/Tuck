@@ -125,7 +125,7 @@ pub enum OutboundError {
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct OutboundHandler<S: CredentialStore> {
     interceptor: HttpInterceptor,
     injection_engine: InjectionEngine<S>,

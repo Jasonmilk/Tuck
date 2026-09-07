@@ -322,7 +322,7 @@ pub trait SignatureVerifier: Send + Sync {
 /// for hard real-time, and the second layer being full 512-bit for post-hoc
 /// audit. This software verifier provides equivalent security for testing
 /// and single-node deployments.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct SoftwareSignatureVerifier {
     /// Shared secret key for HMAC.
     key: Vec<u8>,

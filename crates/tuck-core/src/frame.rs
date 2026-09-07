@@ -360,19 +360,37 @@ impl Default for FrameBuilder {
 pub enum FrameError {
     /// Frame is too short.
     #[error("frame too short: expected {expected} bytes, got {actual}")]
-    TooShort { expected: usize, actual: usize },
+    TooShort {
+        /// Expected frame length in bytes.
+        expected: usize,
+        /// Actual frame length in bytes.
+        actual: usize,
+    },
 
     /// Invalid magic number.
     #[error("invalid magic: expected 0xCF14, got 0x{:02X}{:02X}", actual[0], actual[1])]
-    InvalidMagic { actual: [u8; 2] },
+    InvalidMagic {
+        /// The two magic bytes that were read.
+        actual: [u8; 2],
+    },
 
     /// PFP section is truncated.
     #[error("truncated PFP at offset {offset}: expected 4 bytes, got {available}")]
-    TruncatedPfp { offset: usize, available: usize },
+    TruncatedPfp {
+        /// Byte offset where the PFP should start.
+        offset: usize,
+        /// Bytes available at that offset.
+        available: usize,
+    },
 
     /// SAP section is truncated.
     #[error("truncated SAP at offset {offset}: expected 28 bytes, got {available}")]
-    TruncatedSap { offset: usize, available: usize },
+    TruncatedSap {
+        /// Byte offset where the SAP should start.
+        offset: usize,
+        /// Bytes available at that offset.
+        available: usize,
+    },
 
     /// PFP is not present in this frame.
     #[error("PFP not present in frame")]

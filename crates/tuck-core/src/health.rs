@@ -86,7 +86,7 @@ pub struct HealthMetrics {
 // ============================================================================
 
 /// Health checker — collects component status and metrics.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct HealthChecker {
     /// Service start time.
     start_time: Instant,
@@ -364,7 +364,8 @@ mod tests {
 
         assert_eq!(response.service, "tuck");
         assert_eq!(response.version, "0.1.0");
-        assert!(response.uptime_seconds >= 0);
+        // u64 by construction; presence is what matters, not the value.
+        let _ = response.uptime_seconds;
         assert!(!response.components.is_empty());
     }
 

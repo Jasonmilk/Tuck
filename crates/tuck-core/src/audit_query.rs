@@ -257,7 +257,6 @@ impl Queryable for crate::audit::AuditLog {
 mod tests {
     use super::*;
     use crate::audit::AuditLog;
-    use crate::Decision;
 
     fn setup_log() -> AuditLog {
         use crate::audit::GENESIS_HASH;

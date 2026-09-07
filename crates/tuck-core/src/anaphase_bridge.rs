@@ -44,9 +44,9 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{Decision, OverrideFlag, PfpHeader, RiskLevel, SecurityPolicy};
+use crate::{Decision, PfpHeader, SecurityPolicy};
 use crate::audit::AuditLog;
-use crate::credential::{CredentialError, CredentialStore, IdentityLabel};
+use crate::credential::{CredentialStore, IdentityLabel};
 use crate::injection::{InjectionTarget, OutboundRequest};
 use crate::sap::{LruReplayCache, SignatureVerifier, SapHeader, SapDecision, decide_with_sap};
 
@@ -86,15 +86,27 @@ pub struct SecurityGateRequest {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum InjectionTargetConfig {
     /// HTTP header injection.
-    HttpHeader { name: String },
+    HttpHeader {
+        /// Header name to inject into.
+        name: String,
+    },
     /// Bearer token in Authorization header.
     BearerToken,
     /// Query parameter injection.
-    QueryParam { name: String },
+    QueryParam {
+        /// Query key to inject into.
+        name: String,
+    },
     /// JSON body field injection.
-    BodyField { path: String },
+    BodyField {
+        /// Dot-separated path to the field in the JSON body.
+        path: String,
+    },
     /// Basic auth injection.
-    BasicAuth { username: String },
+    BasicAuth {
+        /// Username for the basic auth pair.
+        username: String,
+    },
 }
 
 impl From<&InjectionTargetConfig> for InjectionTarget {
@@ -195,8 +207,19 @@ pub struct TuckSecurityGate<S: CredentialStore> {
     replay_cache: LruReplayCache,
     /// Optional signature verifier (for SAP PAH-Signature verification).
     signature_verifier: Option<Box<dyn SignatureVerifier>>,
-    /// Source ID for audit logging.
+    /// Source ID for audit logging. Protocol field consumed by the
+    /// downstream CI-144 bridge peer; kept on the struct for the audit path.
+    #[allow(dead_code)]
     source_id: String,
+}
+
+impl<S: CredentialStore> std::fmt::Debug for TuckSecurityGate<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Signature verifier is a trait object — identity only, no internals.
+        f.debug_struct("TuckSecurityGate")
+            .field("source_id", &self.source_id)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<S: CredentialStore> TuckSecurityGate<S> {
@@ -477,7 +500,7 @@ fn pfp_effective_risk_str(bytes: &[u8; 4]) -> String {
 mod tests {
     use super::*;
     use crate::credential::InMemoryCredentialStore;
-    use crate::{Modality, OutputDest, ReplayEnable};
+    use crate::{Modality, OutputDest, OverrideFlag, ReplayEnable, RiskLevel};
 
     fn make_pfp_bytes(risk: RiskLevel, override_flag: OverrideFlag) -> [u8; 4] {
         let mut bytes = [0xCF, 0x14, 0, 0];

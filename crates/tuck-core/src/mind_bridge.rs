@@ -46,7 +46,6 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{Decision, OverrideFlag, RiskLevel};
-use crate::audit::AuditEntry;
 use crate::audit_query::{AuditQuery, QueryResult};
 
 // ============================================================================
@@ -422,6 +421,16 @@ impl MindBridge for NoopMindBridge {
 pub struct SecurityEventEmitter {
     bridge: std::sync::Arc<dyn MindBridge>,
     source_id: String,
+}
+
+impl std::fmt::Debug for SecurityEventEmitter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The bridge is a trait object — print its identity only, never
+        // its internals (memory hygiene: no payload in logs).
+        f.debug_struct("SecurityEventEmitter")
+            .field("source_id", &self.source_id)
+            .finish_non_exhaustive()
+    }
 }
 
 impl SecurityEventEmitter {

@@ -205,7 +205,7 @@ impl TuckConfig {
     /// Validate the configuration.
     pub fn validate(&self) -> Result<(), ConfigError> {
         // Server validation
-        if self.server.port == 0 || self.server.port > 65535 {
+        if self.server.port == 0 {
             return Err(ConfigError::Validation(format!(
                 "server.port must be between 1 and 65535, got {}",
                 self.server.port

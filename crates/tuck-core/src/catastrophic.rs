@@ -19,7 +19,6 @@
 //! load.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, Mutex, Notify};
@@ -97,7 +96,7 @@ pub enum CatastrophicStatus {
 /// // When decide() returns HardOverridePass:
 /// gate.trigger("CATASTROPHIC", "EXECUTIVE", "HARD_OVERRIDE", "Emergency shutdown").await;
 /// ```
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct CatastrophicGate {
     inner: Arc<Mutex<GateInner>>,
     /// Emergency signal — fires on every CATASTROPHIC event.
@@ -106,6 +105,7 @@ pub struct CatastrophicGate {
     broadcast: broadcast::Sender<CatastrophicEvent>,
 }
 
+#[derive(Debug)]
 struct GateInner {
     /// Event history (for audit).
     history: Vec<CatastrophicEvent>,
@@ -272,6 +272,7 @@ fn unix_now() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[tokio::test]
     async fn test_trigger_creates_event() {

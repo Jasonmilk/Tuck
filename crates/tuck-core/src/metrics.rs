@@ -70,12 +70,13 @@ impl RiskCounts {
 /// Tuck metrics registry — all metrics are atomic counters/gauges.
 ///
 /// Cloning is cheap (Arc internally). Pass by value to handlers.
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Metrics {
     inner: Arc<MetricsInner>,
     enabled: bool,
 }
 
+#[derive(Debug)]
 struct MetricsInner {
     // Decision counters
     decisions_pass: AtomicU64,

@@ -30,6 +30,7 @@ use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
 use std::path::Path;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -164,7 +165,7 @@ pub struct AuditChain {
     #[cfg(feature = "anchor")]
     since_anchor: u64,
     #[cfg(feature = "anchor")]
-    signer: Option<Box<dyn Fn(&[u8]) -> Vec<u8>>>,
+    signer: Option<Arc<dyn Fn(&[u8]) -> Vec<u8> + Send + Sync>>,
 }
 
 impl AuditChain {
@@ -206,12 +207,12 @@ impl AuditChain {
     pub fn open_with_anchor(
         path: &Path,
         every: u64,
-        signer: Box<dyn Fn(&[u8]) -> Vec<u8>>,
+        signer: impl Fn(&[u8]) -> Vec<u8> + Send + Sync + 'static,
     ) -> Result<Self, AuditError> {
         debug_assert!(every >= 1, "anchor interval must be >= 1");
         let mut chain = Self::open(path)?;
         chain.anchor_every = Some(every.max(1));
-        chain.signer = Some(signer);
+        chain.signer = Some(Arc::new(signer));
         Ok(chain)
     }
 

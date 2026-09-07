@@ -111,12 +111,13 @@ impl From<ConfirmResult> for Decision {
 /// // Wait for result (or timeout):
 /// let result = rx.await.unwrap(); // Pass or Reject
 /// ```
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct HumanConfirmGate {
     inner: Arc<Mutex<GateInner>>,
     default_timeout: Duration,
 }
 
+#[derive(Debug)]
 struct GateInner {
     /// Pending requests: request_id → (request, oneshot sender).
     pending: HashMap<ConfirmRequestId, (ConfirmRequest, oneshot::Sender<ConfirmResult>)>,

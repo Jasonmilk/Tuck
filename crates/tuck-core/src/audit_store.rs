@@ -55,7 +55,12 @@ pub enum AuditStoreError {
 
     /// Chain verification failed (tampered or corrupted).
     #[error("chain verification failed at entry {index}: {reason}")]
-    ChainInvalid { index: usize, reason: String },
+    ChainInvalid {
+        /// Entry index where verification failed.
+        index: usize,
+        /// Why the chain check failed.
+        reason: String,
+    },
 
     /// Store is not initialized (no file path).
     #[error("store not initialized")]
@@ -109,6 +114,7 @@ pub struct StoreStats {
 /// // Get stats
 /// let stats = store.stats().await?;
 /// ```
+#[derive(Debug)]
 pub struct AuditStore {
     path: PathBuf,
     log: Mutex<AuditLog>,

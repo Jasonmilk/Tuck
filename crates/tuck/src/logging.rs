@@ -19,11 +19,7 @@
 use std::fs::File;
 use std::sync::Arc;
 use thiserror::Error;
-use tracing_subscriber::{
-    fmt,
-    prelude::*,
-    EnvFilter,
-};
+use tracing_subscriber::{fmt, EnvFilter};
 
 use tuck_core::config::LogConfig;
 // ============================================================================

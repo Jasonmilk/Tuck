@@ -88,11 +88,12 @@ pub struct ReloadEvent {
 /// let current = policy.current_policy();
 /// // decide(&pfp, &current)
 /// ```
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct HotReloadPolicy {
     inner: Arc<HotReloadInner>,
 }
 
+#[derive(Debug)]
 struct HotReloadInner {
     /// Current policy config (protected by RwLock for atomic updates).
     config: RwLock<PolicyConfig>,

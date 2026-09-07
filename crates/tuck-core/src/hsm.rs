@@ -92,11 +92,20 @@ pub struct HsmHealth {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyAlgorithm {
     /// RSA with specified key size.
-    Rsa { bits: u32 },
+    Rsa {
+        /// RSA modulus size in bits.
+        bits: u32,
+    },
     /// ECDSA with specified curve.
-    Ecdsa { curve: EcCurve },
+    Ecdsa {
+        /// Elliptic curve to use.
+        curve: EcCurve,
+    },
     /// AES with specified key size.
-    Aes { bits: u32 },
+    Aes {
+        /// AES key size in bits.
+        bits: u32,
+    },
 }
 
 /// Elliptic curve for ECDSA.

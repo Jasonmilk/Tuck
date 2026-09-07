@@ -56,6 +56,7 @@ type CredentialMap = HashMap<String, Vec<u8>>;
 /// Master key for encrypting the credential file.
 ///
 /// Read from `TUCK_MASTER_KEY` env var (base64-encoded 32 bytes).
+#[derive(Debug)]
 pub struct MasterKey {
     key: Zeroizing<[u8; 32]>,
 }
@@ -133,6 +134,7 @@ impl Drop for MasterKey {
 /// // Retrieve a credential
 /// let cred = store.get(&label).await?;
 /// ```
+#[derive(Debug)]
 pub struct FileCredentialStore {
     path: PathBuf,
     master_key: MasterKey,

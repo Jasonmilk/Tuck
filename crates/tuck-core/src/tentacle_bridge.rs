@@ -55,7 +55,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{Decision, OverrideFlag, PfpHeader, RiskLevel, SecurityPolicy};
+use crate::{Decision, PfpHeader, SecurityPolicy};
 use crate::audit::AuditLog;
 use crate::credential::{CredentialStore, IdentityLabel};
 
@@ -146,11 +146,22 @@ pub struct PluginIdentityRequirement {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PluginSource {
     /// Local directory plugin.
-    Local { path: String },
+    Local {
+        /// Path to the plugin directory.
+        path: String,
+    },
     /// Remote URL plugin.
-    Remote { url: String },
+    Remote {
+        /// Fetch URL for the plugin.
+        url: String,
+    },
     /// Registry plugin.
-    Registry { name: String, version: String },
+    Registry {
+        /// Registered plugin name.
+        name: String,
+        /// Plugin version.
+        version: String,
+    },
 }
 
 // ============================================================================
@@ -327,10 +338,13 @@ impl From<Decision> for ToolExecutionDecision {
 /// 2. Permission analysis (excessive permissions → Reject/HITL)
 /// 3. Security level assessment (Critical → HITL)
 /// 4. Sandbox constraint generation
+#[derive(Debug)]
 pub struct TuckPluginAuditor {
     /// Audit log.
     audit_log: AuditLog,
-    /// Source ID for audit logging.
+    /// Source ID for audit logging. Protocol field consumed by the
+    /// downstream CI-144 bridge peer; kept on the struct for the audit path.
+    #[allow(dead_code)]
     source_id: String,
     /// Whether to require HITL for Critical security level plugins.
     pub require_hitl_for_critical: bool,
@@ -539,6 +553,7 @@ impl TuckPluginAuditor {
 /// 3. Credential injection (if identity_label present and Pass)
 /// 4. Sandbox constraint generation
 /// 5. Audit logging
+#[derive(Debug)]
 pub struct TuckToolGate<S: CredentialStore> {
     /// Security policy.
     policy: SecurityPolicy,
@@ -546,7 +561,9 @@ pub struct TuckToolGate<S: CredentialStore> {
     credential_store: S,
     /// Audit log.
     audit_log: AuditLog,
-    /// Source ID.
+    /// Source ID. Protocol field consumed by the downstream CI-144 bridge
+    /// peer; kept on the struct for the audit path.
+    #[allow(dead_code)]
     source_id: String,
 }
 
@@ -724,6 +741,7 @@ impl TentacleBridge for NoopTentacleBridge {
 mod tests {
     use super::*;
     use crate::credential::InMemoryCredentialStore;
+    use crate::{OverrideFlag, RiskLevel};
     use crate::{Modality, OutputDest, ReplayEnable};
 
     fn make_pfp_bytes(risk: RiskLevel, override_flag: OverrideFlag) -> [u8; 4] {

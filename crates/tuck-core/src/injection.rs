@@ -162,7 +162,7 @@ pub struct InjectionResult {
 /// let result = engine.inject(&label, &target, &mut request).await.unwrap();
 /// // request now has X-API-Key header, credential is zeroized
 /// ```
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct InjectionEngine<S: CredentialStore> {
     store: S,
 }
