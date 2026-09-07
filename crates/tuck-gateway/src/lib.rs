@@ -36,6 +36,12 @@ pub mod policy;
 #[cfg(feature = "policy")]
 pub use policy::{Category, Hit, Kind, Rule, RuleSet};
 
+/// Policy matrix (feature `policy`): detection hits → actions, by destination.
+#[cfg(feature = "policy")]
+pub mod matrix;
+#[cfg(feature = "policy")]
+pub use matrix::{Action, Destination, PolicyMatrix, Transform, Verdict, decide};
+
 /// Gateway configuration — no magic constants, everything injected.
 #[derive(Debug, Clone)]
 pub struct GatewayConfig {
