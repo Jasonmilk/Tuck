@@ -1,8 +1,8 @@
 # Tuck 开发导航牌（PLAN）
 
-> **版本**：v0.9.0（内容治理网关 v1 完成，2026-09-07）
-> **状态**：✅ 内容治理网关 v1（审计链 + 身份门 + 检测/混淆/拦截/全量审计）— 365 tests 全绿；旁路焊死待 Anaphase 联动
-> **上一阶段**：G-1..G-4 — 内容治理网关（ADR-0004）✅ 本次完成
+> **版本**：v1.0.0（内容治理 v1 + 零警告 + 会话令牌，2026-09-07）
+> **状态**：✅ 内容治理网关 v1 + JWT 会话令牌 + 只读审计查询 — 368 tests 全绿、--all-features 零警告；旁路焊死待 Anaphase 联动
+> **上一阶段**：G-1..G-10 — 内容治理网关（ADR-0004）✅ 本次完成
 > **分支**：rs
 > **所属方法论**：phyt-DNA v1.0（PLAN 动态流转闭环，方法论锚点项目 https://github.com/Jasonmilk/phyt-DNA）
 > **规则**：本文件只含当前阶段 + 下一阶段预览 + 阶段总览地图。完成阶段 → GROWTH.md。总行数 ≤150，超出触发历史迁移。
@@ -11,7 +11,7 @@
 
 ## 1. 当前阶段：内容治理网关 v1（ADR-0004）✅ 完成
 
-> **状态**：✅ G-1..G-4 全部落地，365 tests 全绿（316 + tuck-audit 11 + gateway 38）。
+> **状态**：✅ G-1..G-10 全部落地，368 tests 全绿（316 + tuck-audit 11 + gateway 41）、--all-features 零警告。
 > **前置**：P0-P7 完成（rs 分支）；P4 全息审计此前为蓝图先行，本轮真实兑现。
 
 ### 1.1 内容治理网关交付（ADR-0004）
@@ -26,6 +26,8 @@
 | G-6 | 映射表（会话级确定性占位符 + redact/demap + demap_miss 不吞不拦） | ✅ commit 2867e1d |
 | G-7 | 全链路接线（检测→政策→redact→转发→JSON/SSE demap 滚动 carry） | ✅ commit 7eebb33 |
 | G-8 | 身份门（Bearer fail-closed）+ 审计全量接入（request/response 双记录 + trace_id）+ 链文件 0600 | ✅ commit b9733b5 |
+| G-9 | 会话令牌 JWT HS256（静态 key 并行通道，scope 进审计，零魔法 hmac+sha2） | ✅ commit 505566a |
+| G-10 | 只读审计查询 `GET /v1/audit`（trace_id/kind/action 过滤，身份门拦截，读链文件不碰热路径） | ✅ commit 505566a |
 
 ### 1.2 验收标准（G 全项）
 
@@ -34,7 +36,7 @@
 - 审计链只存混淆态，映射表驻内存绝不入链 ✅
 - 无密钥 = 拒绝一切（fail-closed）✅
 - 篡改/删行/重排/整链重写全部检测（哈希链 + 签名锚定）✅
-- 测试：365 passed / 0 failed（tuck-audit 11 + gateway 38 + core 316）
+- 测试：368 passed / 0 failed / 0 warnings（tuck-audit 11 + gateway 41 + core 316）
 
 ### 1.1 P6 任务状态（以 git 与代码为准）
 

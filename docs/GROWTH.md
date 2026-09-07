@@ -5,6 +5,20 @@
 
 ---
 
+### 2026-09-07 内容治理 v1.1 + 零警告专项 ✅（ADR-0004 + D11）
+
+- **事件**：①零警告专项：tuck-core 47 个 warning 全清（Debug 补全 / 缺 doc / unused import / 类型极限比较），
+  并修复 --all-features 下 AuditChain 非 Send 隐藏炸弹（signer 改 `Arc<dyn Fn + Send + Sync>`，
+  SSE 治理流不再编译挂）。②会话令牌 JWT HS256（零魔法 hmac+sha2 手写，scope claim = CAPABILITY-13
+  三模式 scopes 载体，透传进审计）。③只读审计查询 `GET /v1/audit`（trace_id/kind/action 过滤，
+  身份门拦截，读链文件不碰热路径）——WebUI 驾驶舱轨迹视图数据源。④VISION v2.1 + SPEC/RNA 对齐：
+  消除"不解密载荷 vs 内容治理"表面歧义——帧层（L1）永不碰载荷，内容层（L4）判字符串不判含义；
+  DNA 红线未动。
+- **关键决策**：双通道身份（静态 key 系统级 / JWT 会话级）；签发确定性（同 claims → 同 token）；
+  审计查询直接读链文件（极致解耦，零热路径锁）。
+- **指标**：368 passed / 0 failed / 0 warnings（--all-features）。commit 505566a（feat）+ a7d3fe8（零警告）+ 1ff6b60（文档）。
+- **下一步**：Cellrix WebUI 驾驶舱轨迹视图按 trace_id join Tuck /v1/audit + Anaphase ledger（白盒可查落地）。
+
 ### 2026-09-07 内容治理网关 v1 ✅ 完成（ADR-0004）
 
 - **事件**：G-1..G-8 全部落地 — 审计链真实兑现 P4 承诺 + 网关内容治理全链路

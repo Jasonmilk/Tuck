@@ -89,6 +89,17 @@ Anaphase → FlowModus（调度：选 endpoint/模型）
 ### D10: 身份核验 fail-closed
 - 网关 Bearer 认证：未配置密钥 = 拒绝一切；密钥不匹配 = 拒绝。先于内容治理执行。
 
+### D11: 会话令牌（JWT HS256）+ 只读审计查询（2026-09-07 落地）
+- 双通道身份：静态 key = 系统级（进程间）；JWT = 会话级（CAPABILITY-13 三模式
+  scopes 的天然载体）。`scope` claim 作为不透明标签透传进审计条目，Tuck 永不
+  语义解释（判字符串不判含义）。
+- 实现零魔法：HS256 直接用 hmac+sha2 手写三段式（header.payload.sig），不引
+  jsonwebtoken 重依赖；算法钉死 HS256（无算法混淆面）；常量时间比较；签发确定
+  性（同 claims → 同 token，无随机 nonce）。
+- `GET /v1/audit`（feature `audit`）：只读查询端点，按 trace_id/kind/action 过滤，
+  身份门拦截（fail-closed）。直接读链文件——不触碰内存热路径。WebUI 驾驶舱
+  轨迹视图按 trace_id join Tuck 审计链 + Anaphase ledger 的数据源（D9 落地）。
+
 ## 3. 备选方案与拒绝理由
 | 备选 | 拒绝理由 |
 |---|---|

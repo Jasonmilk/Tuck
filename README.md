@@ -86,7 +86,7 @@ let router = governance_router(state, rules, PolicyMatrix::default(), AuthConfig
 ## Test Coverage
 
 ```
-365 tests passed, 0 failed
+368 tests passed, 0 failed
 ├── 28 PFP/decision tests (incl. ≥12 fault-injection categories, 100% Reject)
 ├── 27 SAP optional enhancement tests (replay detection/signature verification/LRU cache/decide_with_sap)
 ├── 6 status-flow tests (StatusProvider: summary aggregation/recent reverse projection/empty log/truncation/disabled)
@@ -120,14 +120,16 @@ let router = governance_router(state, rules, PolicyMatrix::default(), AuthConfig
 tuck-audit (11 tests)
 ├── 7 chain tests (append/round-trip/deterministic hashing/tail recovery/tamper: modify/delete/reorder)
 └── 4 anchor tests (batched Ed25519/signature verify/full-rewrite rejection/wrong-key rejection)
-tuck-gateway (38 tests)
+tuck-gateway (41 tests)
 ├── 4 proxy tests (JSON round-trip/SSE passthrough/auth forward/502)
 ├── 6 policy engine tests (dict/regex/entropy rules/category/hit spans)
 ├── 5 policy matrix tests (pass-block-hold precedence/transform/destination tiers/fail-closed)
 ├── 7 redaction table tests (deterministic placeholder/session scope/redact/demap/demap_miss)
 ├── 4 governance pipeline tests (mapping redacted/guard blocked/local hygiene/demap restore)
 ├── 3 identity gate tests (no key denied/wrong key denied/fail-closed unconfigured)
-└── 4 audit integration tests (trace_id joins ledgers/redacted-only chain/unauthorized/audit test)
+├── 6 session token tests (round-trip/expiry/wrong secret/tamper/alg pin/deterministic)
+└── 3 audit query integration tests (JWT scope in audit/trace_id pair/credential required)
+```
 ```
 
 Run tests: `cargo test --workspace`
