@@ -26,20 +26,11 @@ struct Cli {
     /// Configuration file path (TOML).
     #[arg(short, long)]
     config: Option<String>,
-
-    /// Show version and exit.
-    #[arg(short, long)]
-    version: bool,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-
-    if cli.version {
-        println!("Tuck v{}", env!("CARGO_PKG_VERSION"));
-        return Ok(());
-    }
 
     // Load configuration (TOML file + environment variable overrides)
     let config = TuckConfig::load(cli.config.as_deref())?;
