@@ -48,6 +48,12 @@ pub mod redact;
 #[cfg(feature = "redact")]
 pub use redact::{MappingTable, Replacement};
 
+/// Full governance pipeline wiring (features `policy` + `redact`).
+#[cfg(all(feature = "policy", feature = "redact"))]
+pub mod gov;
+#[cfg(all(feature = "policy", feature = "redact"))]
+pub use gov::{GatewayState, Pipeline, governance_router};
+
 /// Gateway configuration — no magic constants, everything injected.
 #[derive(Debug, Clone)]
 pub struct GatewayConfig {

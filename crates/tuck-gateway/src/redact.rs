@@ -137,8 +137,8 @@ impl MappingTable {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::matrix::{Action, Destination, PolicyMatrix, Transform, Verdict, decide};
-    use crate::policy::{Category, Hit, Kind, Rule, RuleSet};
+    use crate::matrix::{Action, Destination, PolicyMatrix, Transform, decide};
+    use crate::policy::{Category, Kind, Rule, RuleSet};
 
     fn mapping_rules() -> RuleSet {
         let rules = vec![Rule {
