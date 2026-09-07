@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/tuck-core",
     "crates/tuck-audit",
+    "crates/tuck-gateway",
     "crates/tuck",
 ]
 
@@ -44,6 +45,11 @@ sha2 = "0.10"
 
 # Ed25519 signature anchoring for audit chain (optional, feature-gated)
 ed25519-dalek = { version = "2" }
+
+# Gateway: HTTP/S typing (content governance host)
+axum = { version = "0.8", features = ["json"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
+futures-util = "0.3"
 
 # AES-GCM for credential encryption
 aes-gcm = "0.10"

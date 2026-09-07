@@ -1,0 +1,27 @@
+[package]
+name = "tuck-gateway"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Tuck content-governance gateway — OpenAI-compatible proxy, detection, policy, redaction"
+
+[features]
+default = []
+# Inbound detection + policy matrix (mapping/guard/hold tables).
+policy = []
+# Semantic redaction (entity → placeholder mapping table).
+redact = []
+
+[dependencies]
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["rt", "net", "io-util", "macros", "sync"] }
+axum.workspace = true
+reqwest.workspace = true
+futures-util.workspace = true
+tracing.workspace = true
+tuck-audit = { path = "../tuck-audit" }
+
+[dev-dependencies]
+tower = "0.5.3"
