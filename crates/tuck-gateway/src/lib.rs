@@ -42,6 +42,12 @@ pub mod matrix;
 #[cfg(feature = "policy")]
 pub use matrix::{Action, Destination, PolicyMatrix, Transform, Verdict, decide};
 
+/// Semantic redaction (feature `redact`): entity → placeholder mapping.
+#[cfg(feature = "redact")]
+pub mod redact;
+#[cfg(feature = "redact")]
+pub use redact::{MappingTable, Replacement};
+
 /// Gateway configuration — no magic constants, everything injected.
 #[derive(Debug, Clone)]
 pub struct GatewayConfig {
