@@ -117,6 +117,26 @@ async fn serve_gateway(config: tuck_core::config::TuckConfig) -> Result<(), Box<
     if !gw.upstream_key.is_empty() {
         state = state.with_upstream_key(gw.upstream_key.clone());
     }
+    // Multi-upstream routing table (X-Route-Tier → endpoint + L2 key).
+    if !gw.upstreams.is_empty() {
+        let entries = gw
+            .upstreams
+            .iter()
+            .filter(|e| !e.tier.is_empty() && !e.base_url.is_empty())
+            .map(|e| tuck_gateway::gov::UpstreamEntry {
+                tier: e.tier.clone(),
+                base_url: e.base_url.clone(),
+                upstream_key: if e.upstream_key.is_empty() {
+                    None
+                } else {
+                    Some(e.upstream_key.clone())
+                },
+            })
+            .collect::<Vec<_>>();
+        if !entries.is_empty() {
+            state = state.with_upstreams(entries);
+        }
+    }
     // Audit chain (feature `audit`): tamper-evident ledger for every call.
     if !gw.audit_path.is_empty() {
         let chain = tuck_audit::AuditChain::open(std::path::Path::new(&gw.audit_path))?;

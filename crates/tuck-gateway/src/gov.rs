@@ -77,11 +77,22 @@ pub struct GatewayState {
     /// caller's Authorization is replaced before leaving the machine — the
     /// caller only ever carries a Tuck credential, never the upstream secret.
     pub upstream_key: Option<String>,
+    /// Multi-upstream routing table (tier → endpoint). Empty = single
+    /// `upstream` (backward compatible). Selected by `X-Route-Tier`.
+    pub upstreams: Vec<UpstreamEntry>,
     /// Session id → mapping table. In-memory only (Rosetta stone rule).
     pub tables: Arc<Mutex<HashMap<String, MappingTable>>>,
     /// Tamper-evident ledger for every governed call (feature `audit`).
     #[cfg(feature = "audit")]
     pub chain: Option<Arc<Mutex<tuck_audit::AuditChain>>>,
+}
+
+/// One route entry inside the gateway (tier → base URL + L2 key).
+#[derive(Debug, Clone)]
+pub struct UpstreamEntry {
+    pub tier: String,
+    pub base_url: String,
+    pub upstream_key: Option<String>,
 }
 
 impl GatewayState {
@@ -94,6 +105,7 @@ impl GatewayState {
             client,
             upstream,
             upstream_key: None,
+            upstreams: Vec::new(),
             tables: Arc::new(Mutex::new(HashMap::new())),
             #[cfg(feature = "audit")]
             chain: None,
@@ -104,6 +116,30 @@ impl GatewayState {
     pub fn with_upstream_key(mut self, key: String) -> Self {
         self.upstream_key = Some(key);
         self
+    }
+
+    /// Attach the multi-upstream routing table (X-Route-Tier selection).
+    pub fn with_upstreams(mut self, entries: Vec<UpstreamEntry>) -> Self {
+        self.upstreams = entries;
+        self
+    }
+
+    /// Resolve the upstream for a request: `X-Route-Tier` header wins when a
+    /// matching entry exists; otherwise the default upstream (单上游兼容).
+    /// Unknown tier → default (fail-open at the route level; audit still
+    /// records the tier label, so misconfiguration is visible).
+    pub fn resolve_upstream(&self, headers: &HeaderMap) -> (&str, Option<&str>) {
+        if let Some(tier) = headers
+            .get("x-route-tier")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
+            if let Some(entry) = self.upstreams.iter().find(|e| e.tier == tier) {
+                return (entry.base_url.as_str(), entry.upstream_key.as_deref());
+            }
+        }
+        (self.upstream.as_str(), self.upstream_key.as_deref())
     }
 
     /// Attach the audit chain (feature `audit`).
@@ -434,10 +470,11 @@ pub async fn governed_chat(
         "caller": caller_of(&caller),
     }));
 
-    // Forward to upstream.
-    let upstream_url = format!("{}/chat/completions", p.state.upstream.trim_end_matches('/'));
+    // Forward to upstream (multi-upstream: X-Route-Tier wins, else default).
+    let (route_base, route_key) = p.state.resolve_upstream(&headers);
+    let upstream_url = format!("{}/chat/completions", route_base.trim_end_matches('/'));
     let mut req = p.state.client.post(&upstream_url);
-    match &p.state.upstream_key {
+    match route_key.or(p.state.upstream_key.as_deref()) {
         // L2: upstream credential injected at the physical edge — the caller
         // credential never leaves the machine.
         Some(key) => {

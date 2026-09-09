@@ -279,6 +279,23 @@ impl TuckConfig {
 // Server Configuration
 // ============================================================================
 
+/// One upstream route entry (tier → OpenAI-compatible endpoint).
+///
+/// `tier` is a free-form route name (`free` / `paid` / any project label);
+/// the caller selects it with `X-Route-Tier: <tier>`. Credentials stay at
+/// the physical edge: each entry carries its own upstream key (L2 injection),
+/// the caller never sees it. 0 硬编码 — everything injected.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UpstreamEntry {
+    /// Route tier label matched by `X-Route-Tier` (e.g. "free").
+    pub tier: String,
+    /// OpenAI-compatible base URL.
+    pub base_url: String,
+    /// Upstream credential injected at the physical edge (L2).
+    #[serde(default)]
+    pub upstream_key: String,
+}
+
 /// Content-governance gateway service configuration (feature `gateway`).
 ///
 /// Every LLM traffic gate in the ecosystem is assembled here: Tuck is the
@@ -295,6 +312,11 @@ pub struct GatewayConfig {
     /// caller's Authorization header before leaving the machine).
     #[serde(default)]
     pub upstream_key: String,
+    /// Multi-upstream routing table (tier → endpoint). Empty = single
+    /// `upstream` (backward compatible). Selected by `X-Route-Tier` header;
+    /// no header / unknown tier falls back to the default upstream.
+    #[serde(default)]
+    pub upstreams: Vec<UpstreamEntry>,
     /// Tuck identity-gate static key (fail-closed: empty = deny all).
     #[serde(default)]
     pub api_key: String,
@@ -315,6 +337,7 @@ impl Default for GatewayConfig {
             enabled: false,
             upstream: String::new(),
             upstream_key: String::new(),
+            upstreams: Vec::new(),
             api_key: String::new(),
             jwt_secret: String::new(),
             audit_path: String::new(),
