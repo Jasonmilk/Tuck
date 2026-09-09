@@ -95,6 +95,8 @@ Point any OpenAI-compatible client at `http://127.0.0.1:60052/v1` with
 replaces the credential with the route's `upstream_key` (L2) before leaving
 the machine, and writes every call (request + response, trace_id-linked)
 to the audit chain. Read it back: `GET /v1/audit?trace_id=...` (same credential).
+Cockpit aggregates: `GET /v1/stats` → destinations/kinds/actions counts + last
+12 requests (route-visible fields only, never prompt bodies).
 
 Route example — daily inference on the free pool, paid as fallback:
 
