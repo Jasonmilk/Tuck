@@ -71,12 +71,19 @@ port = 60052
 
 [gateway]
 enabled = true
-upstream = "http://127.0.0.1:8000/v1"   # the real LLM endpoint
+upstream = "http://127.0.0.1:8000/v1"   # default upstream (单上游兼容)
 upstream_key = "sk-..."                  # L2: injected at the physical edge
 api_key = "tk-local-gate"                # identity gate (fail-closed)
 jwt_secret = ""                          # optional JWT HS256 channel
 audit_path = "/var/tuck/audit.jsonl"     # tamper-evident ledger
 rules_path = ""                          # detection rules JSON (optional)
+
+# Multi-upstream routing (optional): caller selects with `X-Route-Tier: <tier>`.
+# Missing/unknown tier falls back to the default upstream above.
+[[gateway.upstreams]]
+tier = "free"                            # e.g. a permanent free API pool
+base_url = "https://apihub.agnes-ai.com/v1"
+upstream_key = "sk-free-..."
 ```
 
 ```bash
@@ -85,9 +92,18 @@ cargo run --bin tuck --features gateway -- --config tuck.toml
 
 Point any OpenAI-compatible client at `http://127.0.0.1:60052/v1` with
 `Authorization: Bearer tk-local-gate`. The gateway governs the traffic,
-replaces the credential with `upstream_key` before leaving the machine,
-and writes every call (request + response, trace_id-linked) to the audit
-chain. Read it back: `GET /v1/audit?trace_id=...` (same credential).
+replaces the credential with the route's `upstream_key` (L2) before leaving
+the machine, and writes every call (request + response, trace_id-linked)
+to the audit chain. Read it back: `GET /v1/audit?trace_id=...` (same credential).
+
+Route example — daily inference on the free pool, paid as fallback:
+
+```bash
+curl http://127.0.0.1:60052/v1/chat/completions \
+  -H "Authorization: Bearer tk-local-gate" \
+  -H "X-Route-Tier: free" \
+  -d '{"model":"agnes-2.5-flash","messages":[{"role":"user","content":"hi"}]}'
+```
 
 Anaphase wiring (zero code change): set `reasoning_endpoint` to the gateway
 and `reasoning_api_key` to a Tuck credential — the traffic physically
