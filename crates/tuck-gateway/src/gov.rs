@@ -126,9 +126,11 @@ impl GatewayState {
 
     /// Resolve the upstream for a request: `X-Route-Tier` header wins when a
     /// matching entry exists; otherwise the default upstream (单上游兼容).
+    /// Returns `(base_url, key, tier_label)` — the tier label is recorded in
+    /// the audit trail ("free"/"openrouter"/…, "default" when no header).
     /// Unknown tier → default (fail-open at the route level; audit still
     /// records the tier label, so misconfiguration is visible).
-    pub fn resolve_upstream(&self, headers: &HeaderMap) -> (&str, Option<&str>) {
+    pub fn resolve_upstream(&self, headers: &HeaderMap) -> (&str, Option<&str>, String) {
         if let Some(tier) = headers
             .get("x-route-tier")
             .and_then(|v| v.to_str().ok())
@@ -136,10 +138,18 @@ impl GatewayState {
             .filter(|s| !s.is_empty())
         {
             if let Some(entry) = self.upstreams.iter().find(|e| e.tier == tier) {
-                return (entry.base_url.as_str(), entry.upstream_key.as_deref());
+                return (
+                    entry.base_url.as_str(),
+                    entry.upstream_key.as_deref(),
+                    tier.to_string(),
+                );
             }
         }
-        (self.upstream.as_str(), self.upstream_key.as_deref())
+        (
+            self.upstream.as_str(),
+            self.upstream_key.as_deref(),
+            "default".to_string(),
+        )
     }
 
     /// Attach the audit chain (feature `audit`).
@@ -357,6 +367,7 @@ async fn audit_stats(
     };
 
     let mut dest: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
+    let mut tiers: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
     let mut kinds: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
     let mut actions: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
     let mut total: u64 = 0;
@@ -377,6 +388,13 @@ async fn audit_stats(
                 if let Some(d) = data.get("destination").and_then(serde_json::Value::as_str) {
                     *dest.entry(d.to_string()).or_insert(0) += 1;
                 }
+                if let Some(t) = data.get("route_tier").and_then(serde_json::Value::as_str) {
+                    *tiers.entry(t.to_string()).or_insert(0) += 1;
+                } else if kind == "request" {
+                    // 历史记录（tier 字段加入前）归入 default——审计链
+                    // append-only 不回溯，统计层兼容旧格式。
+                    *tiers.entry("default".to_string()).or_insert(0) += 1;
+                }
                 if let Some(a) = data.get("action").and_then(serde_json::Value::as_str) {
                     *actions.entry(a.to_string()).or_insert(0) += 1;
                 }
@@ -389,6 +407,9 @@ async fn audit_stats(
                 if let Some(data) = payload.and_then(|p| p.get("data")) {
                     if let Some(d) = data.get("destination") {
                         slim.insert("destination".into(), d.clone());
+                    }
+                    if let Some(t) = data.get("route_tier") {
+                        slim.insert("route_tier".into(), t.clone());
                     }
                     if let Some(a) = data.get("action") {
                         slim.insert("action".into(), a.clone());
@@ -408,6 +429,7 @@ async fn audit_stats(
             "total": total,
             "kinds": kinds,
             "destinations": dest,
+            "tiers": tiers,
             "actions": actions,
             "last_requests": last,
             "queried_by": caller.sub.unwrap_or_default(),
@@ -559,16 +581,18 @@ pub async fn governed_chat(
     }
 
     // Audit the decision before anything leaves (feature `audit`).
+    let (_, _, route_tier) = p.state.resolve_upstream(&headers);
     record(&p, "request", &trace_id, json!({
         "destination": dest,
         "action": "forward",
+        "route_tier": route_tier,
         "messages": governance,
         "session": session,
         "caller": caller_of(&caller),
     }));
 
     // Forward to upstream (multi-upstream: X-Route-Tier wins, else default).
-    let (route_base, route_key) = p.state.resolve_upstream(&headers);
+    let (route_base, route_key, _) = p.state.resolve_upstream(&headers);
     let upstream_url = format!("{}/chat/completions", route_base.trim_end_matches('/'));
     let mut req = p.state.client.post(&upstream_url);
     match route_key.or(p.state.upstream_key.as_deref()) {
