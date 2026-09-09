@@ -173,6 +173,8 @@ pub fn governance_router(
         .route("/v1/chat/completions", axum::routing::post(governed_chat));
     #[cfg(feature = "audit")]
     let router = router.route("/v1/audit", axum::routing::get(audit_query));
+    #[cfg(feature = "audit")]
+    let router = router.route("/v1/stats", axum::routing::get(audit_stats));
     router.with_state(pipeline)
 }
 
@@ -315,6 +317,101 @@ async fn audit_query(
     (
         axum::http::StatusCode::OK,
         Json(json!({ "entries": entries, "count": count, "queried_by": caller.sub.unwrap_or_default() })),
+    )
+        .into_response()
+}
+
+/// Read-only audit stats endpoint (feature `audit`).
+///
+/// Aggregates the chain for the cockpit's 检定台: destination counts,
+/// kind/action buckets, last N events. Same identity gate, same
+/// read-the-file path — never touches the in-memory hot path.
+#[cfg(feature = "audit")]
+async fn audit_stats(
+    State(p): State<Arc<Pipeline>>,
+    headers: axum::http::HeaderMap,
+) -> axum::response::Response {
+    use axum::Json;
+    let caller = match authenticate(&headers, &p.auth) {
+        Ok(c) => c,
+        Err(()) => {
+            return (
+                axum::http::StatusCode::UNAUTHORIZED,
+                Json(json!({
+                    "error": { "type": "unauthorized", "message": "missing or invalid credential" }
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let path = match p.state.chain.as_ref() {
+        Some(chain) => chain.lock().unwrap().path().to_path_buf(),
+        None => {
+            return (
+                axum::http::StatusCode::NOT_FOUND,
+                Json(json!({ "error": { "type": "no_audit_chain", "message": "audit chain not configured" } })),
+            )
+                .into_response();
+        }
+    };
+
+    let mut dest: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
+    let mut kinds: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
+    let mut actions: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
+    let mut total: u64 = 0;
+    let mut last: Vec<serde_json::Value> = Vec::new();
+
+    if let Ok(content) = std::fs::read_to_string(&path) {
+        for line in content.lines().rev() {
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+            total += 1;
+            let payload = v.get("payload");
+            let kind = payload
+                .and_then(|p| p.get("kind"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("?")
+                .to_string();
+            *kinds.entry(kind.clone()).or_insert(0) += 1;
+            if let Some(data) = payload.and_then(|p| p.get("data")) {
+                if let Some(d) = data.get("destination").and_then(serde_json::Value::as_str) {
+                    *dest.entry(d.to_string()).or_insert(0) += 1;
+                }
+                if let Some(a) = data.get("action").and_then(serde_json::Value::as_str) {
+                    *actions.entry(a.to_string()).or_insert(0) += 1;
+                }
+            }
+            if kind == "request" && last.len() < 12 {
+                // 只摘路由可见字段，不泄 prompt 正文（秘密卫生）
+                let mut slim = serde_json::Map::new();
+                slim.insert("seq".into(), v.get("seq").cloned().unwrap_or(json!(null)));
+                slim.insert("ts".into(), v.get("ts").cloned().unwrap_or(json!(null)));
+                if let Some(data) = payload.and_then(|p| p.get("data")) {
+                    if let Some(d) = data.get("destination") {
+                        slim.insert("destination".into(), d.clone());
+                    }
+                    if let Some(a) = data.get("action") {
+                        slim.insert("action".into(), a.clone());
+                    }
+                    if let Some(s) = data.get("status") {
+                        slim.insert("status".into(), s.clone());
+                    }
+                }
+                last.push(json!(slim));
+            }
+        }
+    }
+
+    (
+        axum::http::StatusCode::OK,
+        Json(json!({
+            "total": total,
+            "kinds": kinds,
+            "destinations": dest,
+            "actions": actions,
+            "last_requests": last,
+            "queried_by": caller.sub.unwrap_or_default(),
+        })),
     )
         .into_response()
 }
