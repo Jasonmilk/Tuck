@@ -558,6 +558,7 @@ pub async fn governed_chat(
             governance.push(serde_json::json!({
                 "destination": dest,
                 "action": "pass",
+                "role": msg.get("role").and_then(Value::as_str).unwrap_or("?"),
                 "transform": v.transform,
                 "categories": v.categories,
             }));

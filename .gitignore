@@ -26,3 +26,4 @@ config.toml
 
 # Runtime audit artifacts
 *.jsonl
+config.toml.bak*
