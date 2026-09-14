@@ -79,9 +79,10 @@ audit_path = "/var/tuck/audit.jsonl"     # tamper-evident ledger
 rules_path = ""                          # detection rules JSON (optional)
 
 # Multi-upstream routing (optional): caller selects with `X-Route-Tier: <tier>`.
+# The label names the supplier, matching the FlowModus registry `supplier_id`.
 # Missing/unknown tier falls back to the default upstream above.
 [[gateway.upstreams]]
-tier = "free"                            # e.g. a permanent free API pool
+tier = "agnes"                           # supplier id (FlowModus registry)
 base_url = "https://apihub.agnes-ai.com/v1"
 upstream_key = "sk-free-..."
 ```
@@ -98,12 +99,12 @@ to the audit chain. Read it back: `GET /v1/audit?trace_id=...` (same credential)
 Cockpit aggregates: `GET /v1/stats` → destinations/kinds/actions counts + last
 12 requests (route-visible fields only, never prompt bodies).
 
-Route example — daily inference on the free pool, paid as fallback:
+Route example — daily inference on the agnes pool, paid as fallback:
 
 ```bash
 curl http://127.0.0.1:60052/v1/chat/completions \
   -H "Authorization: Bearer tk-local-gate" \
-  -H "X-Route-Tier: free" \
+  -H "X-Route-Tier: agnes" \
   -d '{"model":"agnes-2.5-flash","messages":[{"role":"user","content":"hi"}]}'
 ```
 
