@@ -30,6 +30,10 @@ use axum::routing::post;
 use axum::{Json, Router};
 use serde_json::Value;
 
+/// Capability vocabulary (feature `access`): CI-144 `domain:action[:qualifier]`.
+#[cfg(feature = "access")]
+pub mod capability;
+
 /// Access admission (feature `access`): scope → capability allow/deny gate.
 /// Runs before detection — a destination that is not allowed is never read.
 #[cfg(feature = "access")]

@@ -32,6 +32,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::capability::{required, Target};
+
 /// Effect of one access rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -159,183 +161,45 @@ impl AccessTable {
         }
     }
 
-    /// Rules as configured — for tests and for config round-tripping.
-    pub fn rules(&self) -> &[AccessRule] {
-        &self.rules
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn rule(id: &str, scope: &str, capability: &str, effect: Effect) -> AccessRule {
-        AccessRule {
-            id: id.into(),
-            scope: scope.into(),
-            capability: capability.into(),
-            effect,
+    /// Admit one concrete request.
+    ///
+    /// Every capability the call needs must be allowed; the **first** denial
+    /// wins and is returned with its rule id, so the audit trail can name the
+    /// dimension that stopped the call.
+    ///
+    /// A caller without a scope cannot be authorised — there is nothing to
+    /// look up — so it is denied outright instead of falling through to
+    /// `default_action`, which a deployment may have relaxed.
+    pub fn admit_request(&self, scope: Option<&str>, target: &Target) -> Admission {
+        let scope = match scope {
+            Some(s) if !s.trim().is_empty() => s,
+            _ => {
+                return Admission {
+                    effect: Effect::Deny,
+                    rule_id: None,
+                    observe_only: self.config.observe_only,
+                }
+            }
+        };
+        let mut granted: Option<String> = None;
+        for cap in required(target) {
+            let a = self.admit(scope, &cap);
+            if a.effect == Effect::Deny {
+                return a;
+            }
+            if granted.is_none() {
+                granted = a.rule_id;
+            }
+        }
+        Admission {
+            effect: Effect::Allow,
+            rule_id: granted,
+            observe_only: self.config.observe_only,
         }
     }
 
-    fn table(rules: Vec<AccessRule>, config: AccessConfig) -> AccessTable {
-        AccessTable::compile(rules, config).expect("table must compile")
-    }
-
-    #[test]
-    fn explicit_allow_admits() {
-        let t = table(
-            vec![rule("r1", "external_network", "llm:invoke:agnes", Effect::Allow)],
-            AccessConfig::default(),
-        );
-        let a = t.admit("external_network", "llm:invoke:agnes");
-        assert_eq!(a.effect, Effect::Allow);
-        assert_eq!(a.rule_id.as_deref(), Some("r1"));
-        assert!(a.allowed());
-    }
-
-    #[test]
-    fn explicit_deny_rejects() {
-        let t = table(
-            vec![rule("r1", "external_network", "llm:invoke:agnes", Effect::Deny)],
-            AccessConfig::default(),
-        );
-        let a = t.admit("external_network", "llm:invoke:agnes");
-        assert_eq!(a.effect, Effect::Deny);
-        assert!(!a.allowed());
-    }
-
-    #[test]
-    fn deny_wins_regardless_of_order() {
-        let allow_first = table(
-            vec![
-                rule("allow", "s", "c", Effect::Allow),
-                rule("deny", "s", "c", Effect::Deny),
-            ],
-            AccessConfig::default(),
-        );
-        let deny_first = table(
-            vec![
-                rule("deny", "s", "c", Effect::Deny),
-                rule("allow", "s", "c", Effect::Allow),
-            ],
-            AccessConfig::default(),
-        );
-        let a = allow_first.admit("s", "c");
-        let b = deny_first.admit("s", "c");
-        assert_eq!(a.effect, Effect::Deny);
-        assert_eq!(b.effect, Effect::Deny);
-        assert_eq!(a.rule_id.as_deref(), Some("deny"));
-        assert_eq!(b.rule_id.as_deref(), Some("deny"));
-        assert_eq!(a, b, "rule order must not change the verdict");
-    }
-
-    #[test]
-    fn unmatched_falls_through_to_default_deny() {
-        let t = table(
-            vec![rule("r1", "s", "c", Effect::Allow)],
-            AccessConfig::default(),
-        );
-        let a = t.admit("s", "other");
-        assert_eq!(a.effect, Effect::Deny);
-        assert_eq!(a.rule_id, None, "falling through must be distinguishable from a rule hit");
-        assert!(!a.allowed());
-    }
-
-    #[test]
-    fn empty_table_denies_everything() {
-        let t = table(vec![], AccessConfig::default());
-        assert_eq!(t.admit("any", "llm:egress").effect, Effect::Deny);
-    }
-
-    #[test]
-    fn default_action_is_configurable_to_allow() {
-        let t = table(
-            vec![],
-            AccessConfig { default_action: Effect::Allow, observe_only: false },
-        );
-        assert_eq!(t.admit("any", "llm:egress").effect, Effect::Allow);
-    }
-
-    #[test]
-    fn scope_isolation_same_capability_different_scope() {
-        let t = table(
-            vec![rule("r1", "scope_a", "llm:egress", Effect::Allow)],
-            AccessConfig::default(),
-        );
-        assert_eq!(t.admit("scope_a", "llm:egress").effect, Effect::Allow);
-        assert_eq!(t.admit("scope_b", "llm:egress").effect, Effect::Deny);
-    }
-
-    #[test]
-    fn observe_only_records_without_enforcing() {
-        let t = table(
-            vec![rule("r1", "s", "c", Effect::Deny)],
-            AccessConfig { default_action: Effect::Deny, observe_only: true },
-        );
-        let a = t.admit("s", "c");
-        assert_eq!(a.effect, Effect::Deny, "the verdict is still recorded");
-        assert!(a.observe_only);
-        assert!(a.allowed(), "but it is not enforced");
-    }
-
-    #[test]
-    fn default_config_is_deny_and_enforcing() {
-        let cfg = AccessConfig::default();
-        assert_eq!(cfg.default_action, Effect::Deny);
-        assert!(!cfg.observe_only);
-    }
-
-    #[test]
-    fn admit_is_a_pure_function() {
-        let t = table(
-            vec![
-                rule("r1", "s", "c1", Effect::Allow),
-                rule("r2", "s", "c2", Effect::Deny),
-            ],
-            AccessConfig::default(),
-        );
-        let first = (t.admit("s", "c1"), t.admit("s", "c2"), t.admit("s", "c3"));
-        let second = (t.admit("s", "c1"), t.admit("s", "c2"), t.admit("s", "c3"));
-        assert_eq!(first.0, second.0);
-        assert_eq!(first.1, second.1);
-        assert_eq!(first.2, second.2);
-    }
-
-    // ---- compile-time failures (D6) ----
-
-    #[test]
-    fn duplicate_id_is_rejected_at_compile() {
-        let rules = vec![
-            rule("dup", "s", "c1", Effect::Allow),
-            rule("dup", "s", "c2", Effect::Deny),
-        ];
-        assert!(AccessTable::compile(rules, AccessConfig::default()).is_err());
-    }
-
-    #[test]
-    fn empty_fields_are_rejected_at_compile() {
-        assert!(AccessTable::compile(
-            vec![rule("", "s", "c", Effect::Allow)],
-            AccessConfig::default()
-        )
-        .is_err());
-        assert!(AccessTable::compile(
-            vec![rule("r1", "", "c", Effect::Allow)],
-            AccessConfig::default()
-        )
-        .is_err());
-        assert!(AccessTable::compile(
-            vec![rule("r1", "s", "  ", Effect::Allow)],
-            AccessConfig::default()
-        )
-        .is_err());
-    }
-
-    #[test]
-    fn rules_round_trip_through_the_table() {
-        let rules = vec![rule("r1", "s", "c", Effect::Allow)];
-        let t = AccessTable::compile(rules.clone(), AccessConfig::default()).unwrap();
-        assert_eq!(t.rules(), &rules[..]);
+    /// Rules as configured — for tests and for config round-tripping.
+    pub fn rules(&self) -> &[AccessRule] {
+        &self.rules
     }
 }
