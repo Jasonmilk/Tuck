@@ -34,6 +34,13 @@ use serde_json::Value;
 #[cfg(feature = "access")]
 pub mod capability;
 
+/// Notification sinks for admission denials (feature `access`). No
+/// implementation is built in — the deployment injects its own.
+#[cfg(feature = "access")]
+pub mod notify;
+#[cfg(feature = "access")]
+pub use notify::{Denial, Notify};
+
 /// Access admission (feature `access`): scope → capability allow/deny gate.
 /// Runs before detection — a destination that is not allowed is never read.
 #[cfg(feature = "access")]

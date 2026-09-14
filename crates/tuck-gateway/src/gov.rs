@@ -45,6 +45,8 @@ use crate::policy::RuleSet;
 use crate::redact::MappingTable;
 #[cfg(feature = "access")]
 use crate::access::AccessTable;
+#[cfg(feature = "access")]
+use crate::notify::{Denial, fanout};
 
 /// Default session when the header is absent.
 const DEFAULT_SESSION: &str = "default";
@@ -98,6 +100,10 @@ pub struct GatewayState {
     /// table: an empty table denies everything, no table simply abstains.
     #[cfg(feature = "access")]
     pub access: Option<AccessTable>,
+    /// Notification sinks for admission denials (feature `access`). Empty by
+    /// default: no channel is built in (ADR-0005 D8).
+    #[cfg(feature = "access")]
+    pub notifies: Vec<Arc<dyn crate::notify::Notify>>,
 }
 
 /// One route entry inside the gateway (tier → base URL + L2 key).
@@ -124,6 +130,8 @@ impl GatewayState {
             chain: None,
             #[cfg(feature = "access")]
             access: None,
+            #[cfg(feature = "access")]
+            notifies: Vec::new(),
         }
     }
 
@@ -180,6 +188,13 @@ impl GatewayState {
     #[cfg(feature = "access")]
     pub fn with_access(mut self, table: AccessTable) -> Self {
         self.access = Some(table);
+        self
+    }
+
+    /// Register a notification sink for admission denials (feature `access`).
+    #[cfg(feature = "access")]
+    pub fn with_notify(mut self, sink: Arc<dyn crate::notify::Notify>) -> Self {
+        self.notifies.push(sink);
         self
     }
 
@@ -543,13 +558,17 @@ pub async fn governed_chat(
             caller.scope.as_deref(),
             &crate::capability::Target { supplier, model },
         );
-        if !verdict.allowed() {
+        // Record on the verdict's *effect*, enforce on its *enforcement*.
+        // Under observe_only `allowed()` is always true, so gating the record
+        // on it would drop the one signal observation exists to produce.
+        if verdict.effect == crate::access::Effect::Deny {
             record(
                 &p,
                 "request",
                 &trace_id,
                 json!({
                     "action": "access_deny",
+                    "observe_only": verdict.observe_only,
                     "scope": caller.scope,
                     "supplier": supplier,
                     "model": model,
@@ -557,17 +576,30 @@ pub async fn governed_chat(
                     "caller": caller_of(&caller),
                 }),
             );
-            return (
-                StatusCode::FORBIDDEN,
-                Json(json!({
-                    "error": {
-                        "type": "access_deny",
-                        "message": "scope is not allowed to reach this destination",
-                        "rule_id": verdict.rule_id,
-                    }
-                })),
-            )
-                .into_response();
+            fanout(
+                &p.state.notifies,
+                &Denial {
+                    trace_id: trace_id.clone(),
+                    scope: caller.scope.clone(),
+                    supplier: supplier.map(str::to_string),
+                    model: model.map(str::to_string),
+                    rule_id: verdict.rule_id.clone(),
+                    observe_only: verdict.observe_only,
+                },
+            );
+            if !verdict.allowed() {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(json!({
+                        "error": {
+                            "type": "access_deny",
+                            "message": "scope is not allowed to reach this destination",
+                            "rule_id": verdict.rule_id,
+                        }
+                    })),
+                )
+                    .into_response();
+            }
         }
     }
 

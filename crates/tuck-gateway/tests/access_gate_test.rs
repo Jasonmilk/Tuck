@@ -12,7 +12,7 @@ use axum::http::{Request, StatusCode};
 use axum::Router;
 use serde_json::{json, Value};
 use tuck_gateway::gov::{governance_router, AuthConfig, GatewayState};
-use tuck_gateway::{AccessConfig, AccessTable, PolicyMatrix, RuleSet};
+use tuck_gateway::{AccessConfig, AccessTable, Denial, Effect, Notify, PolicyMatrix, RuleSet};
 use tower::ServiceExt;
 
 /// Router with a gate that is either installed or absent.
@@ -93,4 +93,96 @@ async fn gate_runs_before_content_detection() {
     let table = AccessTable::compile(vec![], AccessConfig::default()).expect("compiles");
     let (status, _) = chat(router_with(Some(table)), None).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+
+// ---- H-6: observe mode ----
+
+#[tokio::test]
+async fn observe_mode_does_not_enforce() {
+    let table = AccessTable::compile(
+        vec![],
+        AccessConfig {
+            default_action: Effect::Deny,
+            observe_only: true,
+        },
+    )
+    .expect("compiles");
+    let (status, _) = chat(router_with(Some(table)), Some("m1")).await;
+    assert_ne!(
+        status,
+        StatusCode::FORBIDDEN,
+        "observe mode records the denial but must not enforce it"
+    );
+}
+
+// ---- H-5: notification sinks ----
+
+/// Test sink: keeps the denials it was handed.
+struct Recorder(std::sync::Arc<std::sync::Mutex<Vec<Denial>>>);
+
+impl Notify for Recorder {
+    fn on_denial(&self, d: &Denial) {
+        self.0.lock().expect("sink lock").push(d.clone());
+    }
+}
+
+fn router_with_sink(seen: std::sync::Arc<std::sync::Mutex<Vec<Denial>>>, observe: bool) -> Router {
+    let table = AccessTable::compile(
+        vec![],
+        AccessConfig {
+            default_action: Effect::Deny,
+            observe_only: observe,
+        },
+    )
+    .expect("compiles");
+    let state = GatewayState::new("http://127.0.0.1:9/v1".into())
+        .with_access(table)
+        .with_notify(std::sync::Arc::new(Recorder(seen)));
+    governance_router(
+        std::sync::Arc::new(state),
+        RuleSet::compile(&[]).expect("empty rule set compiles"),
+        PolicyMatrix::default(),
+        AuthConfig {
+            api_key: Some("k".into()),
+            jwt_secret: None,
+        },
+    )
+}
+
+#[tokio::test]
+async fn a_registered_sink_receives_the_denial() {
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let (status, _) = chat(router_with_sink(seen.clone(), false), Some("m1")).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let got = seen.lock().expect("sink lock").clone();
+    assert_eq!(got.len(), 1, "exactly one denial is reported");
+    assert_eq!(got[0].model.as_deref(), Some("m1"));
+    assert_eq!(got[0].scope, None, "the static-key caller carries no scope");
+    assert!(!got[0].observe_only);
+}
+
+#[tokio::test]
+async fn no_sink_registered_means_nothing_is_sent() {
+    // The default shape: the gateway has no built-in channel (ADR-0005 D8).
+    let table = AccessTable::compile(vec![], AccessConfig::default()).expect("compiles");
+    let (status, _) = chat(router_with(Some(table)), Some("m1")).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+
+#[tokio::test]
+async fn observe_mode_still_reports_the_denial() {
+    // The whole point of observation is to see what *would* have been denied.
+    // A mode that neither enforces nor reports is indistinguishable from
+    // having no gate at all, so assert the report, not just the absence of 403.
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let (status, _) = chat(router_with_sink(seen.clone(), true), Some("m1")).await;
+    assert_ne!(status, StatusCode::FORBIDDEN, "not enforced");
+
+    let got = seen.lock().expect("sink lock").clone();
+    assert_eq!(got.len(), 1, "but still reported — observation must not be silent");
+    assert!(got[0].observe_only);
+    assert_eq!(got[0].model.as_deref(), Some("m1"));
 }

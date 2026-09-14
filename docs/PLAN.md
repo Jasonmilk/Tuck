@@ -96,13 +96,13 @@
 | H-1 | 策略表结构与解析器（黑白同一张表 + `effect`，配置期 fail-closed） | ✅ |
 | H-2 | 准入闸门接入 pipeline（置于 `detect` **之前**） | ✅ |
 | H-3 | capability 命名空间常量表（`llm:egress` / `llm:invoke` / `llm:model`） | ✅ |
-| H-4 | 审计链扩字段（`scope` / `capability` / `rule_id` / `effect`） | ⬜ |
-| H-5 | 通知 sink trait（默认无实现，不配不发） | ⬜ |
-| H-6 | 观察模式 `observe_only`（只记不拦，防上线即断） | ⬜ |
+| H-4 | 审计链扩字段（`scope` / `capability` / `rule_id` / `effect`） | ✅ |
+| H-5 | 通知 sink trait（默认无实现，不配不发） | ✅ |
+| H-6 | 观察模式 `observe_only`（只记不拦，防上线即断） | ✅ |
 | H-7 | 测试：A/B（先证伪）+ 变异测试证明非空转 | ⬜ |
 | H-8 | `config.example.toml` 补 `[gateway]` / `[access]` 段（example 已漂移） | ⬜ |
 
-**H-1..H-3 验收**（含接线）：32 条单测 + **4 条端到端**（装了空表 ⇒ 403、错误体 access_deny、未装表 ⇒ 不拒、干净 payload 仍被拦 ⇒ 证明闸门在 detect 之前）；**接线变异**：闸门改为永不拦截 ⇒ 端到端挂 3 条；全量 `--all-features` **399 passed / 0 failed**（基线 363）；`access.rs` 205 行 + `capability.rs` 128 行（测试 297 行移入 `tests/access_test.rs`，守 400 行红线）；32 条测试（capability 6 + access 22 + 既有 proxy 4）；A/B 基线 363 → 全量 395 passed / 0 failed；变异测试三组（去掉 egress 挂 3 / deny 不早退挂 5 / 无 scope 回落默认挂 1）⇒ 非空转；clippy 零警告。
+**H-1..H-6 验收**：单测 22 + capability 6 + notify 3；端到端 8（空表 403 / 错误体 / 未装表不拒 / 干净 payload 仍拦 / 观察模式不拦 / **观察模式仍上报** / sink 收到 / 无 sink 不发）；变异五组均被捕获 ⇒ 非空转；全量 `--all-features` 406 passed / 0 failed（基线 363）；clippy 新文件零警告。
 
 **接线要点**：`GatewayState::with_access()` 装表，`None` = 闸门不参与（与「空表拒一切」严格区分）；上游回退标签 default 提为常量 `DEFAULT_TIER_LABEL` —— 它不是供应商，闸门不拿它当供应商用。
 
