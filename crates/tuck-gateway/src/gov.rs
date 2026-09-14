@@ -43,9 +43,16 @@ use serde_json::{json, Value};
 use crate::matrix::{Destination, PolicyMatrix, Transform, decide};
 use crate::policy::RuleSet;
 use crate::redact::MappingTable;
+#[cfg(feature = "access")]
+use crate::access::AccessTable;
 
 /// Default session when the header is absent.
 const DEFAULT_SESSION: &str = "default";
+/// Tier label used when no `X-Route-Tier` matched — the single-upstream
+/// fallback. It names the *absence* of a supplier, not a supplier, so the
+/// access gate must not treat it as one (single source for this string:
+/// `resolve_upstream` and the gate both read it from here).
+const DEFAULT_TIER_LABEL: &str = "default";
 
 /// Governance runtime config — injected, never hardcoded.
 #[derive(Debug, Clone, Default)]
@@ -85,6 +92,12 @@ pub struct GatewayState {
     /// Tamper-evident ledger for every governed call (feature `audit`).
     #[cfg(feature = "audit")]
     pub chain: Option<Arc<Mutex<tuck_audit::AuditChain>>>,
+    /// Access admission table (feature `access`, ADR-0005).
+    ///
+    /// `None` = no gate installed, which is **not** the same as an empty
+    /// table: an empty table denies everything, no table simply abstains.
+    #[cfg(feature = "access")]
+    pub access: Option<AccessTable>,
 }
 
 /// One route entry inside the gateway (tier → base URL + L2 key).
@@ -109,6 +122,8 @@ impl GatewayState {
             tables: Arc::new(Mutex::new(HashMap::new())),
             #[cfg(feature = "audit")]
             chain: None,
+            #[cfg(feature = "access")]
+            access: None,
         }
     }
 
@@ -148,7 +163,7 @@ impl GatewayState {
         (
             self.upstream.as_str(),
             self.upstream_key.as_deref(),
-            "default".to_string(),
+            DEFAULT_TIER_LABEL.to_string(),
         )
     }
 
@@ -156,6 +171,15 @@ impl GatewayState {
     #[cfg(feature = "audit")]
     pub fn with_chain(mut self, chain: tuck_audit::AuditChain) -> Self {
         self.chain = Some(Arc::new(Mutex::new(chain)));
+        self
+    }
+
+    /// Install the access gate (feature `access`). Until this is called the
+    /// gate abstains entirely — deliberately different from installing an
+    /// empty table, which denies every call.
+    #[cfg(feature = "access")]
+    pub fn with_access(mut self, table: AccessTable) -> Self {
+        self.access = Some(table);
         self
     }
 
@@ -501,6 +525,51 @@ pub async fn governed_chat(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("local")
         .to_string();
+
+    // Access gate (H-2, ADR-0005): admission runs before detection — a
+    // destination that is not allowed never has its payload read.
+    #[cfg(feature = "access")]
+    if let Some(table) = &p.state.access {
+        let (_, _, tier) = p.state.resolve_upstream(&headers);
+        // The fallback label names the absence of a supplier, not one; gating
+        // on it would force every single-upstream deployment to invent a name.
+        let supplier = if tier == DEFAULT_TIER_LABEL {
+            None
+        } else {
+            Some(tier.as_str())
+        };
+        let model = body.get("model").and_then(Value::as_str);
+        let verdict = table.admit_request(
+            caller.scope.as_deref(),
+            &crate::capability::Target { supplier, model },
+        );
+        if !verdict.allowed() {
+            record(
+                &p,
+                "request",
+                &trace_id,
+                json!({
+                    "action": "access_deny",
+                    "scope": caller.scope,
+                    "supplier": supplier,
+                    "model": model,
+                    "rule_id": verdict.rule_id,
+                    "caller": caller_of(&caller),
+                }),
+            );
+            return (
+                StatusCode::FORBIDDEN,
+                Json(json!({
+                    "error": {
+                        "type": "access_deny",
+                        "message": "scope is not allowed to reach this destination",
+                        "rule_id": verdict.rule_id,
+                    }
+                })),
+            )
+                .into_response();
+        }
+    }
 
     // Per-message governance. Messages is an array of {role, content}.
     let mut governance: Vec<serde_json::Value> = Vec::new();
