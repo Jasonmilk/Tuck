@@ -93,7 +93,7 @@
 
 | 任务 | 内容 | 状态 |
 |---|---|---|
-| H-1 | 策略表结构与解析器（黑白同一张表 + `effect`，配置期 fail-closed） | ⬜ |
+| H-1 | 策略表结构与解析器（黑白同一张表 + `effect`，配置期 fail-closed） | ✅ |
 | H-2 | 准入闸门接入 pipeline（置于 `detect` **之前**） | ⬜ |
 | H-3 | capability 命名空间常量表（`llm:egress` / `llm:invoke` / `llm:model`） | ⬜ |
 | H-4 | 审计链扩字段（`scope` / `capability` / `rule_id` / `effect`） | ⬜ |
@@ -101,6 +101,8 @@
 | H-6 | 观察模式 `observe_only`（只记不拦，防上线即断） | ⬜ |
 | H-7 | 测试：A/B（先证伪）+ 变异测试证明非空转 | ⬜ |
 | H-8 | `config.example.toml` 补 `[gateway]` / `[access]` 段（example 已漂移） | ⬜ |
+
+**H-1 验收**：13 条单测（精确匹配 / deny 优先且与规则顺序无关 / scope 隔离 / 未命中回落 default / 空表拒一切 / 观察模式只记不拦 / 纯度）；**变异测试**：默认动作 deny→allow 挂 4 条、deny 优先改先到先得挂 1 条 ⇒ 非空转；全量 `--all-features` 380 passed / 0 failed（基线 363，新增 17，零回归），`access.rs` clippy 零警告。
 
 **CI-144 兼容**：不新造清单格式，复用 CAPABILITY-13 §2.1 的 `scope → capability[]`；
 JWT `scope` claim 已在审计链上，载体现成。**默认 deny 可配，清单为空 ⇒ 拒绝全部。**

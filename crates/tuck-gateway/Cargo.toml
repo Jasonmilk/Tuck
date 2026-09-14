@@ -11,6 +11,9 @@ default = []
 policy = []
 # Semantic redaction (entity → placeholder mapping table).
 redact = []
+# Access admission: scope -> capability allow/deny gate (ADR-0005). Independent
+# of `policy` — access control and content inspection are separate concerns.
+access = []
 # Audit chain integration: every governed call lands in the tamper-evident
 # ledger (request decision + response outcome, linked by trace id).
 audit = ["dep:tuck-audit"]

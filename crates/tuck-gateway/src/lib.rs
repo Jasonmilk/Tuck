@@ -30,6 +30,13 @@ use axum::routing::post;
 use axum::{Json, Router};
 use serde_json::Value;
 
+/// Access admission (feature `access`): scope → capability allow/deny gate.
+/// Runs before detection — a destination that is not allowed is never read.
+#[cfg(feature = "access")]
+pub mod access;
+#[cfg(feature = "access")]
+pub use access::{AccessConfig, AccessRule, AccessTable, Admission, Effect};
+
 /// Detection engine (feature `policy`): objective predicates over payloads.
 #[cfg(feature = "policy")]
 pub mod policy;
