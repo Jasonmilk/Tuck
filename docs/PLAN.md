@@ -85,9 +85,29 @@
 
 ---
 
-## 2. 下一阶段预览：生态消费联动（跨仓库）
+## 2. 下一阶段预览
 
-Tuck 接口面已全部就绪，下一阶段是**生态消费**（非 Tuck 仓库内工程）：
+### 2.1 H 系列：访问白名单 —— scope→capability 准入闸门（ADR-0005，Tuck 仓内）
+
+内容治理答「payload 有什么」，准入答「能去哪」—— ADR-0005 补上后者。
+
+| 任务 | 内容 | 状态 |
+|---|---|---|
+| H-1 | 策略表结构与解析器（黑白同一张表 + `effect`，配置期 fail-closed） | ⬜ |
+| H-2 | 准入闸门接入 pipeline（置于 `detect` **之前**） | ⬜ |
+| H-3 | capability 命名空间常量表（`llm:egress` / `llm:invoke` / `llm:model`） | ⬜ |
+| H-4 | 审计链扩字段（`scope` / `capability` / `rule_id` / `effect`） | ⬜ |
+| H-5 | 通知 sink trait（默认无实现，不配不发） | ⬜ |
+| H-6 | 观察模式 `observe_only`（只记不拦，防上线即断） | ⬜ |
+| H-7 | 测试：A/B（先证伪）+ 变异测试证明非空转 | ⬜ |
+| H-8 | `config.example.toml` 补 `[gateway]` / `[access]` 段（example 已漂移） | ⬜ |
+
+**CI-144 兼容**：不新造清单格式，复用 CAPABILITY-13 §2.1 的 `scope → capability[]`；
+JWT `scope` claim 已在审计链上，载体现成。**默认 deny 可配，清单为空 ⇒ 拒绝全部。**
+
+### 2.2 生态消费联动（跨仓库）
+
+Tuck 接口面已全部就绪，生态消费侧（非 Tuck 仓库内工程）：
 
 - **Cellrix 渲染**：按 `StatusProvider` 消费决策状态（Pass/Reject/HITL/CATASTROPHIC 实时展示）— Cellrix 仓库
 - **Anaphase D'-2**：`TuckSecurityGate`（P6-T3 已提供）接入 Anaphase pipeline — Anaphase 仓库
@@ -122,3 +142,4 @@ Tuck 接口面已全部就绪，下一阶段是**生态消费**（非 Tuck 仓�
 | CI-144 协议家族 | PFP-xCF14（4字节冻结）+ SAP-xCF14（28字节演进），非 24 字节 PAL |
 | 状态流接口 | status.rs：StatusProvider（summary + recent_decisions） |
 | 内容治理 | ADR-0004：全量过门 + 三表政策 + 判字符串不判含义 + 混淆态入链 |
+| 访问白名单 | ADR-0005：准入闸门 + scope→capability + deny 优先 + 默认 deny |
