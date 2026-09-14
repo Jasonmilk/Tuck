@@ -85,3 +85,56 @@ enabled = true
 path = "/metrics"
 # Metrics listen port (0 = same port as main server, default: 0)
 port = 0
+
+# ---------- Gateway ----------
+[gateway]
+# Default upstream OpenAI-compatible base URL.
+upstream = "https://api.deepseek.com/v1"
+# Credential injected at the physical edge (L2): the caller carries a Tuck
+# credential, never the upstream secret.
+# upstream_key = "<upstream-api-key>"
+
+# Multi-upstream routing: the `X-Route-Tier` header selects the entry.
+# The label names the SUPPLIER — it must match the FlowModus registry
+# supplier_id (registry/free/agnes.json, registry/free/openrouter.json).
+# Unmatched tier falls back to `upstream` above.
+# [[gateway.upstreams]]
+# tier = "agnes"
+# base_url = "https://apihub.agnes-ai.com/v1"
+# upstream_key = "<supplier-api-key>"
+
+# ---------- Access admission (ADR-0005) ----------
+[access]
+# Verdict when no rule matches: "deny" (default) or "allow".
+# An empty rule list denies everything: no list means no access.
+default_action = "deny"
+# Record the verdict without enforcing it, so a deployment can watch what
+# would be denied before tightening. Denials are still recorded and reported.
+observe_only = false
+
+# Allow and deny share ONE table; deny wins regardless of rule order.
+# Capabilities use the CI-144 three-part name `domain:action[:qualifier]`
+# (CAPABILITY-13 §2.1):
+#   llm:egress            - may make outbound LLM calls at all
+#   llm:invoke:<supplier> - may reach this supplier
+#   llm:model:<model>     - may call this model
+#
+# A call must be allowed on EVERY capability it needs; the first denial wins
+# and is reported with its rule id. `scope` is the caller's JWT scope claim.
+# The single-upstream fallback is not a supplier and is never gated as one.
+#
+# [[access.rules]]
+# id = "egress-read"
+# scope = "read"
+# capability = "llm:egress"
+# effect = "allow"
+#
+# [[access.rules]]
+# id = "block-expensive-model"
+# scope = "read"
+# capability = "llm:model:gpt-4"
+# effect = "deny"
+
+# Notification sinks for denials are injected by the deployment in code; no
+# channel ships with the gateway (ADR-0005 D8). With none registered, nothing
+# is sent.
