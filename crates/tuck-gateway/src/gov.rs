@@ -41,7 +41,9 @@ use serde_json::{json, Value};
 
 use crate::matrix::{Destination, PolicyMatrix, Transform, decide};
 use crate::policy::RuleSet;
-use crate::state::{AuthConfig, Caller, GatewayState};
+use crate::state::{AuthConfig, Caller, GatewayState, Pipeline};
+use crate::identity::{authenticate, destination_of, session_of};
+use crate::ledger::{caller_of, record};
 #[cfg(feature = "access")]
 use crate::notify::{Denial, fanout};
 
@@ -65,71 +67,6 @@ pub fn governance_router(
     #[cfg(feature = "audit")]
     let router = router.route("/v1/stats", axum::routing::get(audit_stats));
     router.with_state(pipeline)
-}
-
-pub struct Pipeline {
-    pub state: Arc<GatewayState>,
-    pub rules: RuleSet,
-    pub matrix: PolicyMatrix,
-    pub auth: AuthConfig,
-}
-
-/// Identity gate (T-C1): bearer credential required. Fail-closed — an
-/// unconfigured or mismatched credential denies the call before governance
-/// even runs. Two channels: static key (system-level) and JWT HS256
-/// (session-level, carries the CAPABILITY-13 mode scope).
-fn authenticate(headers: &HeaderMap, auth: &AuthConfig) -> Result<Caller, ()> {
-    let token = headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "));
-    let Some(token) = token else {
-        return Err(());
-    };
-    // JWT channel first (session identity + scope).
-    if let Some(secret) = &auth.jwt_secret {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        if let Ok(claims) = crate::token::verify(token, secret.as_bytes(), now) {
-            return Ok(Caller {
-                api_key_id: None,
-                sub: Some(claims.sub),
-                scope: Some(claims.scope),
-            });
-        }
-    }
-    // Static key channel (system-level).
-    match &auth.api_key {
-        Some(key) if token == key.as_str() => Ok(Caller {
-            api_key_id: Some("system".into()),
-            sub: None,
-            scope: None,
-        }),
-        _ => Err(()),
-    }
-}
-
-fn session_of(headers: &HeaderMap) -> String {
-    headers
-        .get("x-tuck-session")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or(crate::state::DEFAULT_SESSION)
-        .to_string()
-}
-
-fn destination_of(headers: &HeaderMap) -> Destination {
-    // Destination is injected by the caller (FlowModus marks the target).
-    match headers
-        .get("x-tuck-destination")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("local") => Destination::Local,
-        _ => Destination::External,
-    }
 }
 
 /// Read-only audit query endpoint (feature `audit`).
@@ -315,40 +252,6 @@ async fn audit_stats(
         })),
     )
         .into_response()
-}
-
-/// Caller identity fragment for audit entries (opaque labels only).
-fn caller_of(c: &Caller) -> serde_json::Value {
-    let mut v = serde_json::Map::new();
-    if let Some(id) = &c.api_key_id {
-        v.insert("api_key_id".into(), json!(id));
-    }
-    if let Some(sub) = &c.sub {
-        v.insert("sub".into(), json!(sub));
-    }
-    if let Some(scope) = &c.scope {
-        v.insert("scope".into(), json!(scope));
-    }
-    serde_json::Value::Object(v)
-}
-
-/// Append one audit entry (feature `audit`); no-op without it (按需加载).
-fn record(p: &Pipeline, kind: &str, trace_id: &str, payload: serde_json::Value) {
-    #[cfg(feature = "audit")]
-    {
-        if let Some(chain) = &p.state.chain {
-            if let Ok(mut chain) = chain.lock() {
-                let entry = json!({
-                    "kind": kind,
-                    "trace_id": trace_id,
-                    "data": payload,
-                });
-                let _ = chain.append(&tuck_audit::SystemClock, entry);
-            }
-        }
-    }
-    #[cfg(not(feature = "audit"))]
-    let _ = (p, kind, trace_id, payload);
 }
 
 /// Govern one request/response round trip.

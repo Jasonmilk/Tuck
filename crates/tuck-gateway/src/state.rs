@@ -17,6 +17,8 @@ use std::sync::{Arc, Mutex};
 use axum::http::HeaderMap;
 
 use crate::redact::MappingTable;
+use crate::matrix::PolicyMatrix;
+use crate::policy::RuleSet;
 #[cfg(feature = "access")]
 use crate::access::AccessTable;
 #[cfg(feature = "access")]
@@ -177,4 +179,15 @@ impl GatewayState {
         tables.entry(session.to_string()).or_insert_with(MappingTable::new);
         tables
     }
+}
+
+/// Runtime wiring for the governance pipeline.
+///
+/// Held together in one place so the pipeline stages receive a single
+/// immutable context instead of threading four values through every call.
+pub struct Pipeline {
+    pub state: Arc<GatewayState>,
+    pub rules: RuleSet,
+    pub matrix: PolicyMatrix,
+    pub auth: AuthConfig,
 }

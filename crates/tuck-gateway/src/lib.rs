@@ -52,7 +52,15 @@ pub use access::{AccessConfig, AccessRule, AccessTable, Admission, Effect};
 #[cfg(all(feature = "policy", feature = "redact"))]
 pub mod state;
 #[cfg(all(feature = "policy", feature = "redact"))]
-pub use state::{AuthConfig, Caller, GatewayState, UpstreamEntry};
+pub use state::{AuthConfig, Caller, GatewayState, Pipeline, UpstreamEntry};
+
+/// Caller identity gate (features `policy` + `redact`).
+#[cfg(all(feature = "policy", feature = "redact"))]
+pub mod identity;
+
+/// Audit ledger writes (features `policy` + `redact`).
+#[cfg(all(feature = "policy", feature = "redact"))]
+pub mod ledger;
 
 /// Detection engine (feature `policy`): objective predicates over payloads.
 #[cfg(feature = "policy")]
@@ -76,7 +84,7 @@ pub use redact::{MappingTable, Replacement};
 #[cfg(all(feature = "policy", feature = "redact"))]
 pub mod gov;
 #[cfg(all(feature = "policy", feature = "redact"))]
-pub use gov::{Pipeline, governance_router};
+pub use gov::governance_router;
 
 /// Session tokens (JWT HS256) — CAPABILITY-13 mode-scope carrier.
 #[cfg(all(feature = "policy", feature = "redact"))]
