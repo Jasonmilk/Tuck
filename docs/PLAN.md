@@ -94,7 +94,8 @@
 | 任务 | 内容 | 状态 |
 |---|---|---|
 | **H-1..H-8** | 准入闸门全部交付（表与解析器 / pipeline 接线 / capability 命名空间 / 审计字段 / 通知 sink / 观察模式 / 测试 / 配置样例），详见 `ADR-0005` T1–T8 | ✅ |
-| H-9 | 语料热加载（`ADR-0005` D9/T9）：`RuleSet` 原子替换，编译失败保留旧规则 | ⬜ |
+| H-9 | 语料热加载（`ADR-0005` D9/T9）：`RuleSet` 原子替换，编译失败保留旧规则 | ✅ |
+| **R-1** | `gov.rs` 解耦：1154 → **388 行**（state / identity / ledger / audit_api / router 各成一档 + 测试移入 `tests/`），全 crate 14 模块无一超 400 红线 | ✅ |
 
 **H-1..H-8 验收**：`config.example.toml` 补 `[gateway]` / `[access]` 段（141 行，TOML 解析校验通过，无真实凭证；此前 example 连 `[gateway]` 都没有）；单测 22 + capability 6 + notify 3；端到端 8（空表 403 / 错误体 / 未装表不拒 / 干净 payload 仍拦 / 观察模式不拦 / **观察模式仍上报** / sink 收到 / 无 sink 不发）；变异五组均被捕获 ⇒ 非空转；全量 `--all-features` 406 passed / 0 failed（基线 363）；clippy 新文件零警告。
 
