@@ -150,7 +150,10 @@ pub async fn governed_chat(
                 .get("content")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
-            let v = decide(content, &p.rules, &p.matrix, dest);
+            let v = {
+                let corpus = p.rules.read().await;
+                decide(content, &corpus, &p.matrix, dest)
+            };
             match v.action {
                 crate::matrix::Action::Block => {
                     record(&p, "request", &trace_id, json!({

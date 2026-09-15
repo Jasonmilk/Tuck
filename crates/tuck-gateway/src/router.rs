@@ -22,6 +22,14 @@ pub fn governance_router(
     matrix: PolicyMatrix,
     auth: AuthConfig,
 ) -> Router {
+    let rules = Arc::new(tokio::sync::RwLock::new(rules));
+
+    // Corpus hot reload is opt-in: only a configured path starts a watcher.
+    if let Some(path) = state.rules_path.clone() {
+        let interval = state.corpus_watch_interval_s;
+        crate::reload::spawn_corpus_watchdog(path, Arc::clone(&rules), interval);
+    }
+
     let pipeline = Arc::new(Pipeline {
         state,
         rules,

@@ -67,7 +67,12 @@ pub struct GatewayState {
     pub upstreams: Vec<UpstreamEntry>,
     /// Session id → mapping table. In-memory only (Rosetta stone rule).
     pub tables: Arc<Mutex<HashMap<String, MappingTable>>>,
-    /// Tamper-evident ledger for every governed call (feature `audit`).
+        /// Corpus file watched for hot reload (ADR-0005 D9). `None` = no watcher —
+    /// hot reload is opt-in, so a deployment that never sets this pays nothing.
+    pub rules_path: Option<std::path::PathBuf>,
+    /// Seconds between corpus checks. Only used when `rules_path` is set.
+    pub corpus_watch_interval_s: u64,
+/// Tamper-evident ledger for every governed call (feature `audit`).
     #[cfg(feature = "audit")]
     pub chain: Option<Arc<Mutex<tuck_audit::AuditChain>>>,
     /// Access admission table (feature `access`, ADR-0005).
@@ -108,12 +113,21 @@ impl GatewayState {
             access: None,
             #[cfg(feature = "access")]
             notifies: Vec::new(),
+            rules_path: None,
+            corpus_watch_interval_s: 30,
         }
     }
 
     /// Inject the upstream credential (L2 physical-edge injection).
     pub fn with_upstream_key(mut self, key: String) -> Self {
         self.upstream_key = Some(key);
+        self
+    }
+
+    /// Watch a corpus file and hot-reload detection rules when it changes.
+    pub fn with_corpus(mut self, path: std::path::PathBuf, interval_s: u64) -> Self {
+        self.rules_path = Some(path);
+        self.corpus_watch_interval_s = interval_s;
         self
     }
 
@@ -187,7 +201,8 @@ impl GatewayState {
 /// immutable context instead of threading four values through every call.
 pub struct Pipeline {
     pub state: Arc<GatewayState>,
-    pub rules: RuleSet,
+    /// Detection corpus. Behind a lock so it can be hot-reloaded (`ADR-0005` D9).
+    pub rules: Arc<tokio::sync::RwLock<RuleSet>>,
     pub matrix: PolicyMatrix,
     pub auth: AuthConfig,
 }

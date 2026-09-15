@@ -72,6 +72,10 @@ pub mod router;
 #[cfg(all(feature = "policy", feature = "redact"))]
 pub use router::governance_router;
 
+/// Corpus hot reload (feature `policy`): swap detection rules without a restart.
+#[cfg(feature = "policy")]
+pub mod reload;
+
 /// Detection engine (feature `policy`): objective predicates over payloads.
 #[cfg(feature = "policy")]
 pub mod policy;

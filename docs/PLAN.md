@@ -93,14 +93,8 @@
 
 | 任务 | 内容 | 状态 |
 |---|---|---|
-| H-1 | 策略表结构与解析器（黑白同一张表 + `effect`，配置期 fail-closed） | ✅ |
-| H-2 | 准入闸门接入 pipeline（置于 `detect` **之前**） | ✅ |
-| H-3 | capability 命名空间常量表（`llm:egress` / `llm:invoke` / `llm:model`） | ✅ |
-| H-4 | 审计链扩字段（`scope` / `capability` / `rule_id` / `effect`） | ✅ |
-| H-5 | 通知 sink trait（默认无实现，不配不发） | ✅ |
-| H-6 | 观察模式 `observe_only`（只记不拦，防上线即断） | ✅ |
-| H-7 | 测试：A/B（先证伪）+ 变异测试证明非空转 | ✅ |
-| H-8 | `config.example.toml` 补 `[gateway]` / `[access]` 段（example 已漂移） | ✅ |
+| **H-1..H-8** | 准入闸门全部交付（表与解析器 / pipeline 接线 / capability 命名空间 / 审计字段 / 通知 sink / 观察模式 / 测试 / 配置样例），详见 `ADR-0005` T1–T8 | ✅ |
+| H-9 | 语料热加载（`ADR-0005` D9/T9）：`RuleSet` 原子替换，编译失败保留旧规则 | ⬜ |
 
 **H-1..H-8 验收**：`config.example.toml` 补 `[gateway]` / `[access]` 段（141 行，TOML 解析校验通过，无真实凭证；此前 example 连 `[gateway]` 都没有）；单测 22 + capability 6 + notify 3；端到端 8（空表 403 / 错误体 / 未装表不拒 / 干净 payload 仍拦 / 观察模式不拦 / **观察模式仍上报** / sink 收到 / 无 sink 不发）；变异五组均被捕获 ⇒ 非空转；全量 `--all-features` 406 passed / 0 failed（基线 363）；clippy 新文件零警告。
 
