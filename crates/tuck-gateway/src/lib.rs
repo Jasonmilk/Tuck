@@ -66,6 +66,12 @@ pub mod ledger;
 #[cfg(all(feature = "policy", feature = "redact", feature = "audit"))]
 pub mod audit_api;
 
+/// Router assembly (features `policy` + `redact`).
+#[cfg(all(feature = "policy", feature = "redact"))]
+pub mod router;
+#[cfg(all(feature = "policy", feature = "redact"))]
+pub use router::governance_router;
+
 /// Detection engine (feature `policy`): objective predicates over payloads.
 #[cfg(feature = "policy")]
 pub mod policy;
@@ -88,7 +94,6 @@ pub use redact::{MappingTable, Replacement};
 #[cfg(all(feature = "policy", feature = "redact"))]
 pub mod gov;
 #[cfg(all(feature = "policy", feature = "redact"))]
-pub use gov::governance_router;
 
 /// Session tokens (JWT HS256) — CAPABILITY-13 mode-scope carrier.
 #[cfg(all(feature = "policy", feature = "redact"))]

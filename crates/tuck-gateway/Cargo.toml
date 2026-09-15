@@ -35,3 +35,4 @@ regex = "1.13.1"
 
 [dev-dependencies]
 tower = "0.5.3"
+tuck-audit = { path = "../tuck-audit" }
