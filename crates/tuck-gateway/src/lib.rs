@@ -62,6 +62,10 @@ pub mod identity;
 #[cfg(all(feature = "policy", feature = "redact"))]
 pub mod ledger;
 
+/// Read-only audit endpoints (features `policy` + `redact` + `audit`).
+#[cfg(all(feature = "policy", feature = "redact", feature = "audit"))]
+pub mod audit_api;
+
 /// Detection engine (feature `policy`): objective predicates over payloads.
 #[cfg(feature = "policy")]
 pub mod policy;
