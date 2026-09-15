@@ -1,3 +1,5 @@
+#![cfg(feature = "access")]
+//!
 //! Access admission tests (H-1 table, H-2 request admission).
 //!
 //! Kept as an integration test so `access.rs` stays under the 400-line
