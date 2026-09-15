@@ -48,6 +48,12 @@ pub mod access;
 #[cfg(feature = "access")]
 pub use access::{AccessConfig, AccessRule, AccessTable, Admission, Effect};
 
+/// Gateway state and injected configuration (features `policy` + `redact`).
+#[cfg(all(feature = "policy", feature = "redact"))]
+pub mod state;
+#[cfg(all(feature = "policy", feature = "redact"))]
+pub use state::{AuthConfig, Caller, GatewayState, UpstreamEntry};
+
 /// Detection engine (feature `policy`): objective predicates over payloads.
 #[cfg(feature = "policy")]
 pub mod policy;
@@ -70,7 +76,7 @@ pub use redact::{MappingTable, Replacement};
 #[cfg(all(feature = "policy", feature = "redact"))]
 pub mod gov;
 #[cfg(all(feature = "policy", feature = "redact"))]
-pub use gov::{GatewayState, Pipeline, governance_router};
+pub use gov::{Pipeline, governance_router};
 
 /// Session tokens (JWT HS256) — CAPABILITY-13 mode-scope carrier.
 #[cfg(all(feature = "policy", feature = "redact"))]

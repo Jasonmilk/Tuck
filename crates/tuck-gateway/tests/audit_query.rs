@@ -13,7 +13,7 @@ use axum::routing::post;
 use axum::{Json, Router};
 use serde_json::{json, Value};
 use tuck_audit::AuditChain;
-use tuck_gateway::gov::{AuthConfig, GatewayState, governance_router};
+use tuck_gateway::{AuthConfig, GatewayState, governance_router};
 use tuck_gateway::matrix::PolicyMatrix;
 use tuck_gateway::policy::RuleSet;
 use tuck_gateway::token::{Claims, issue};

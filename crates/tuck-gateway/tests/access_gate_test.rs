@@ -11,7 +11,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use axum::Router;
 use serde_json::{json, Value};
-use tuck_gateway::gov::{governance_router, AuthConfig, GatewayState};
+use tuck_gateway::{governance_router, AuthConfig, GatewayState};
 use tuck_gateway::{AccessConfig, AccessTable, Denial, Effect, Notify, PolicyMatrix, RuleSet};
 use tower::ServiceExt;
 

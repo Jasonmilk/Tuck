@@ -99,7 +99,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// hardcoded values.
 #[cfg(feature = "gateway")]
 async fn serve_gateway(config: tuck_core::config::TuckConfig) -> Result<(), Box<dyn std::error::Error>> {
-    use tuck_gateway::gov::{AuthConfig, GatewayState, governance_router};
+    use tuck_gateway::{AuthConfig, GatewayState, governance_router};
 
     let gw = config.gateway;
     if gw.upstream.is_empty() {
@@ -123,7 +123,7 @@ async fn serve_gateway(config: tuck_core::config::TuckConfig) -> Result<(), Box<
             .upstreams
             .iter()
             .filter(|e| !e.tier.is_empty() && !e.base_url.is_empty())
-            .map(|e| tuck_gateway::gov::UpstreamEntry {
+            .map(|e| tuck_gateway::UpstreamEntry {
                 tier: e.tier.clone(),
                 base_url: e.base_url.clone(),
                 upstream_key: if e.upstream_key.is_empty() {
