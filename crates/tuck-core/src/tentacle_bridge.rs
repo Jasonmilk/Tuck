@@ -371,7 +371,23 @@ impl TuckPluginAuditor {
         let trace_id = request.trace_id;
 
         // Step 1: Integrity verification
-        let integrity_verified = request.integrity_hash == request.computed_hash;
+        //
+        // 两个**空串**相等 ⇒ `true` 是曾经的形状（K-080）：模块内没有任何非空/hex
+        // 校验，于是"没有数据"被一个比较运算说成"数据一致"。今天缺 hash 的历史插件
+        // 会因此被标为"完整性已验证"。
+        //
+        // 现在：只有**两边都有实质内容**且**逐字相同**才算已验证。
+        // 注意这不是"翻成 fail-open"——`integrity_verified = false` 在本函数里
+        // 走到 Step 4 的 `Reject`（见下），即缺 hash 的插件从"静默通过"变为"被拒"，
+        // 方向是**更严**。
+        //
+        // 字段仍是 `bool`（未改为三态 `Unknown`）：本仓签发侧确实无法表达"判不出"，
+        // 而按纪律**不得在修复中顺手发明 API 变体**。若人类裁定要让"未测量"成为
+        // 可表达的一等值，那是另一次 ADR（关联 K-080 的残留项）。
+        let has_hash_data =
+            !request.integrity_hash.trim().is_empty() && !request.computed_hash.trim().is_empty();
+        let integrity_verified =
+            has_hash_data && request.integrity_hash == request.computed_hash;
 
         // Step 2: Permission analysis
         let (permission_decision, permission_reason) = self.analyze_permissions(&request.permissions);
@@ -403,7 +419,15 @@ impl TuckPluginAuditor {
 
         // Step 6: Build reason
         let reason = if !integrity_verified {
-            Some("Integrity verification failed: manifest hash does not match computed hash".to_string())
+            Some(
+                if has_hash_data {
+                    "Integrity verification failed: manifest hash does not match computed hash"
+                } else {
+                    "Integrity not verified: manifest or computed hash is empty \
+                     (absent is not the same as matching)"
+                }
+                .to_string(),
+            )
         } else if permission_decision == PluginAuditDecision::Reject {
             permission_reason
         } else if decision == PluginAuditDecision::NeedHumanConfirm {
@@ -519,18 +543,25 @@ impl TuckPluginAuditor {
         plugin_version: &str,
         integrity_verified: bool,
     ) -> Option<Uuid> {
-        let decision_str = match decision {
-            PluginAuditDecision::Pass => "Pass",
-            PluginAuditDecision::Reject => "Reject",
-            PluginAuditDecision::NeedHumanConfirm => "NeedHumanConfirm",
-        };
+        // 记**真实判定**。此前这里硬编码 `Decision::Pass` 作基值，而把真实判定
+        // 塞进 `identity_label` 参数走私（K-082）—— 而 `AuditEntry.identity_label`
+        // 的文档写的是"用于凭据注入的身份标签"，不是判定；调用点还以
+        // `Some(decision_str)` 传字符串。后果是账本**把所有拒绝都记成 Pass**，
+        // 而账本是"人类据以追责/复盘"的那份证据（属于改安全默认分类表中的
+        // "账本的证据价值"）。
         let entry = self.audit_log.append(
-            Decision::Pass, // Plugin audit uses Pass as base (actual decision in source field)
+            match decision {
+                PluginAuditDecision::Pass => Decision::Pass,
+                PluginAuditDecision::Reject => Decision::Reject,
+                PluginAuditDecision::NeedHumanConfirm => Decision::NeedHumanConfirm,
+            },
             "Low",
             "PluginAudit",
             "Normal",
             &format!("{}:{} (integrity={})", plugin_name, plugin_version, integrity_verified),
-            Some(decision_str),
+            // `identity_label` 回归其字段本义：插件审计的调用点没有身份标签，
+            // 故为 `None`（判定已由第一个参数承载）。
+            None,
         );
         Some(entry.entry_id)
     }
@@ -801,6 +832,139 @@ mod tests {
         assert!(!response.integrity_verified);
         assert!(response.reason.is_some());
         assert!(response.reason.unwrap().contains("Integrity"));
+    }
+
+    /// K-080 / S-3 **回归网**：`"" == ""` 不得被当作"完整性已验证"。
+    ///
+    /// 两个空串相等曾是 `integrity_verified = true` 的来源 —— 用一个比较运算把
+    /// "没有数据"说成"数据一致"。本断言钉住：空 hash ⇒ **未验证且被拒**。
+    #[test]
+    fn test_plugin_audit_empty_hashes_are_not_verified() {
+        let mut auditor = TuckPluginAuditor::new("tuck_test");
+        let mut request = make_plugin_audit_request(
+            PluginSecurityLevel::Normal,
+            true, // helper 会给出 "abc123" == "abc123" …
+            PluginPermissions::default(),
+        );
+        // … 但我们把两边都清空：这才是历史插件的实际形状（缺 hash）。
+        request.integrity_hash = String::new();
+        request.computed_hash = String::new();
+
+        let response = auditor.audit_plugin(&request);
+
+        assert!(
+            !response.integrity_verified,
+            "两个空串不得读作「已校验」—— 缺席不是「相同」(K-080/S-3)"
+        );
+        assert_eq!(
+            response.decision,
+            PluginAuditDecision::Reject,
+            "缺 hash ⇒ 不得加载（方向是更严，不是放行）"
+        );
+        let reason = response.reason.unwrap_or_default();
+        assert!(
+            reason.contains("empty") || reason.contains("not verified"),
+            "理由必须说清是「没有数据」，而不是「数据不一致」：{reason}"
+        );
+    }
+
+    /// K-082 / S-4 **回归网**：账本必须记**真实判定**，不得一律记 `Pass`。
+    ///
+    /// 此前 `log_audit` 硬编码 `Decision::Pass`，把真实判定塞进
+    /// `identity_label` 走私 —— 于是账本里每一次拒绝都显示为通过。
+    #[test]
+    fn test_plugin_audit_ledger_records_the_real_decision() {
+        let mut auditor = TuckPluginAuditor::new("tuck_test");
+
+        // 一个必然被拒的插件：完整性不匹配。
+        let rejected = make_plugin_audit_request(
+            PluginSecurityLevel::Normal,
+            false,
+            PluginPermissions::default(),
+        );
+        let response = auditor.audit_plugin(&rejected);
+        assert_eq!(response.decision, PluginAuditDecision::Reject);
+
+        let entry = auditor
+            .audit_log()
+            .latest()
+            .expect("审计必须留下条目");
+        assert_eq!(
+            entry.decision, "Reject",
+            "账本必须记真实判定；把它记成 Pass 正是 K-082/S-4"
+        );
+        assert_eq!(
+            entry.identity_label, None,
+            "真实判定不得再走私进 `identity_label` —— 那个字段的语义是凭据注入的身份标签"
+        );
+    }
+
+    /// **闭环**：`PluginAuditDecision` → `Decision` → 账本字符串，**三态各自端到端**。
+    ///
+    /// 为什么必须三态都**真跑一遍**：初版这个测试只端到端跑了 `Pass` 与 `Reject`，
+    /// 另用一条本地 `match` 断言映射的字面量 —— 那抓不到生产侧的错误映射。
+    /// 变异验证证实了这点：把 `log_audit` 里的 `NeedHumanConfirm` 故意映射成
+    /// `Decision::Pass`，初版测试**照样绿**。故改为三态各自经 `audit_plugin` 真的
+    /// 落到账本再断言。
+    ///
+    /// 顺带验证账本哈希链在混入非 Pass 条目后仍然完好（改判定不得破坏 `prev_hash`）。
+    #[test]
+    fn test_plugin_audit_decision_mapping_is_injective_and_chain_holds() {
+        let mut auditor = TuckPluginAuditor::new("tuck_test");
+
+        // ① Pass：Normal + 完整性匹配
+        let passed = make_plugin_audit_request(
+            PluginSecurityLevel::Normal,
+            true,
+            PluginPermissions::default(),
+        );
+        assert_eq!(auditor.audit_plugin(&passed).decision, PluginAuditDecision::Pass);
+        assert_eq!(auditor.audit_log().latest().unwrap().decision, "Pass");
+
+        // ② NeedHumanConfirm：Critical + 完整性匹配（require_hitl_for_critical 默认开）
+        let hitl = make_plugin_audit_request(
+            PluginSecurityLevel::Critical,
+            true,
+            PluginPermissions::default(),
+        );
+        assert_eq!(
+            auditor.audit_plugin(&hitl).decision,
+            PluginAuditDecision::NeedHumanConfirm,
+            "前提：Critical 必须落到 NeedHumanConfirm，否则 ② 没测到该态"
+        );
+        assert_eq!(
+            auditor.audit_log().latest().unwrap().decision,
+            "NeedHumanConfirm",
+            "NeedHumanConfirm 被错记成 Pass 也必须在账本上看出（初版漏的就是这一态）"
+        );
+
+        // ③ Reject：完整性不匹配
+        let rejected = make_plugin_audit_request(
+            PluginSecurityLevel::Normal,
+            false,
+            PluginPermissions::default(),
+        );
+        assert_eq!(auditor.audit_plugin(&rejected).decision, PluginAuditDecision::Reject);
+        assert_eq!(
+            auditor.audit_log().latest().unwrap().decision,
+            "Reject",
+            "混入 Reject 条目后，账本不得仍显示 Pass"
+        );
+
+        // 三态在账本里必须两两不同 —— 否则"如实记录"就是空的
+        let rendered: Vec<String> = auditor
+            .audit_log()
+            .iter()
+            .map(|e| e.decision.clone())
+            .collect();
+        assert_eq!(rendered, vec!["Pass", "NeedHumanConfirm", "Reject"]);
+
+        // 账本哈希链必须仍然自洽（改判定不得破坏 prev_hash 链）
+        auditor
+            .audit_log()
+            .verify_chain()
+            .expect("改判定后哈希链仍须完好");
+        assert_eq!(auditor.audit_log().len(), 3, "三次审计 ⇒ 三条账本");
     }
 
     #[test]
