@@ -88,11 +88,23 @@ port = 0
 
 # ---------- Gateway ----------
 [gateway]
+# Serve the governance gateway on startup.
+enabled = true
 # Default upstream OpenAI-compatible base URL.
 upstream = "https://api.deepseek.com/v1"
 # Credential injected at the physical edge (L2): the caller carries a Tuck
 # credential, never the upstream secret.
 # upstream_key = "<upstream-api-key>"
+
+# Tamper-evident audit chain file (ADR-0006). WITHOUT it the gateway still
+# serves, but `GET /v1/audit` answers 404 `no_audit_chain` — the "only door"
+# keeps no ledger. That failure is silent unless someone asks for it, which is
+# why this key is demonstrated here: a machine-rebuilt config that drops it
+# loses the audit leg with no error anywhere.
+# The launcher may inject it instead of editing this file, via the non-secret
+# env override `TUCK_GATEWAY__AUDIT_PATH` (secrets deliberately have no env
+# channel — DNA iron rule 3).
+audit_path = "/var/lib/tuck/audit.chain"
 
 # Multi-upstream routing: the `X-Route-Tier` header selects the entry.
 # The label names the SUPPLIER — it must match the FlowModus registry

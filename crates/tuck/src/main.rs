@@ -156,6 +156,20 @@ async fn serve_gateway(config: tuck_core::config::TuckConfig) -> Result<(), Box<
     let addr = format!("{}:{}", config.server.host, config.server.port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 
+    // ADR-0006: an unconfigured audit chain is not an error — an ungoverned
+    // deployment is a legitimate choice — but it must not be a *surprise*. The
+    // gateway serves either way, so say out loud that the "only door" keeps no
+    // ledger. Without this line the absence is discoverable only by asking
+    // `/v1/audit` and reading a 404, which is how a whole audit leg stayed
+    // invisible while every launcher reported Tuck healthy.
+    if gw.audit_path.is_empty() {
+        tracing::warn!(
+            target: "tuck::gateway",
+            "audit chain NOT configured (gateway.audit_path is empty): \
+             GET /v1/audit will answer 404 no_audit_chain — this gateway keeps no ledger"
+        );
+    }
+
     tracing::info!(
         target: "tuck::gateway",
         addr = %addr,

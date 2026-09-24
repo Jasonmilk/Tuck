@@ -205,6 +205,35 @@ impl TuckConfig {
         if let Ok(format) = std::env::var("TUCK_LOG__FORMAT") {
             self.log.format = format;
         }
+
+        // Gateway — OPERATIONAL fields only (ADR-0006).
+        //
+        // The launcher must be able to close the audit leg without editing
+        // `config.toml`, which is gitignored: a machine-rebuilt config silently
+        // lost `audit_path`, so `/v1/audit` answered 404 `no_audit_chain` while
+        // the gateway still served. Same 12-factor shape `anaphase` already uses
+        // for its endpoints ("injected without touching config.toml").
+        //
+        // ⚠️ Secrets are deliberately NOT here: `api_key`, `jwt_secret` and
+        // `upstream_key` stay in the untracked 0600 config. Environment
+        // variables are visible to child processes and /proc, which contradicts
+        // DNA iron rule 3 (plaintext credentials exist only at the instant of
+        // physical injection).
+        if let Ok(v) = std::env::var("TUCK_GATEWAY__ENABLED") {
+            if !v.is_empty() {
+                self.gateway.enabled = v == "true" || v == "1";
+            }
+        }
+        if let Ok(v) = std::env::var("TUCK_GATEWAY__UPSTREAM") {
+            if !v.is_empty() {
+                self.gateway.upstream = v;
+            }
+        }
+        if let Ok(v) = std::env::var("TUCK_GATEWAY__AUDIT_PATH") {
+            if !v.is_empty() {
+                self.gateway.audit_path = v;
+            }
+        }
     }
 
     /// Validate the configuration.
@@ -842,5 +871,52 @@ enabled = false
         let config = TuckConfig::load(None).unwrap();
         assert_eq!(config.log.level, "debug");
         std::env::remove_var("TUCK_LOG__LEVEL");
+    }
+
+    /// ADR-0006 — both directions in ONE test on purpose.
+    ///
+    /// Environment variables are process-global while this harness runs tests in
+    /// parallel, so two tests sharing `TUCK_GATEWAY__AUDIT_PATH` would race each
+    /// other. One test, executed sequentially, removes the hazard instead of
+    /// documenting it.
+    #[test]
+    fn test_env_override_gateway_audit_path_both_directions() {
+        let dir = std::env::temp_dir().join(format!("tuck-adr6-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(
+            &path,
+            "[server]\nhost = \"127.0.0.1\"\nport = 60052\n\n\
+             [audit]\nenabled = true\nlog_path = \"/tmp/tuck-adr6-audit.log\"\n\n\
+             [gateway]\nenabled = true\naudit_path = \"/from/file.chain\"\n",
+        )
+        .unwrap();
+        let file = path.to_str().unwrap();
+
+        // 1. Unset => the file's value stands.
+        std::env::remove_var("TUCK_GATEWAY__AUDIT_PATH");
+        assert_eq!(
+            TuckConfig::load(Some(file)).unwrap().gateway.audit_path,
+            "/from/file.chain"
+        );
+
+        // 2. A non-empty value wins: this is what lets the launcher close the
+        //    audit leg without editing the gitignored `config.toml`.
+        std::env::set_var("TUCK_GATEWAY__AUDIT_PATH", "/from/env.chain");
+        assert_eq!(
+            TuckConfig::load(Some(file)).unwrap().gateway.audit_path,
+            "/from/env.chain"
+        );
+
+        // 3. An EMPTY value is ignored — it must not clear what the file said.
+        //    (Asserting this against the default "" would be vacuous: "" == "")
+        std::env::set_var("TUCK_GATEWAY__AUDIT_PATH", "");
+        assert_eq!(
+            TuckConfig::load(Some(file)).unwrap().gateway.audit_path,
+            "/from/file.chain"
+        );
+
+        std::env::remove_var("TUCK_GATEWAY__AUDIT_PATH");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
