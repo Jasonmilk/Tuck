@@ -115,6 +115,10 @@ pub use token::{Claims, TokenError, issue, verify};
 pub struct GatewayConfig {
     /// Upstream OpenAI-compatible base URL (e.g. `http://127.0.0.1:8000/v1`).
     pub upstream: String,
+    /// 准入表（feature `access`，ADR-0005）。**`None` = 没装门**——
+    /// 而"没装门"**不是**"空表"（空表拒绝一切，没表只是弃权）。见本仓 I7。
+    #[cfg(feature = "access")]
+    pub access: Option<AccessTable>,
 }
 
 #[derive(Clone)]
@@ -172,12 +176,31 @@ struct GateResponseOut {
  *   ⇒ 所以 `reason` 里写清 `gate=none`，而不是返回一个空的 reason 冒充"检查过了"。
  * ★ 观察态：本阶段一律 `pass`（**不改行为** —— 让 M2 的接线可以独立验证）。
  *   真正的判定（policy / access / catastrophic）在 M1b 接上；审计行也在 M1b 落（M1 验收②）。 */
-async fn security_gate(Json(check): Json<GateCheckIn>) -> Response {
-    let gate_present = false; /* M1b 会把这里换成 state 里的 access/chain 是否已装 */
-    let why = if gate_present {
-        "observe_mode; gate=installed (verdict 记录但暂不拦 —— M1b 接入策略与审计)"
-    } else {
-        "observe_mode; gate=none —— 未装配任何准入表（I7：没有装门不得看起来像门通过了）"
+async fn security_gate(State(gw): State<Arc<Gateway>>, Json(check): Json<GateCheckIn>) -> Response {
+    /* ★ M1b-2a：接【准入表】（access）。判定用既有的 `AccessTable::admit(scope, capability)`
+     * （`access.rs:133`），它返回的 `Admission` **自带 `rule_id` 与 `observe_only`** ——
+     * 该结构体的注释写着 "Carried so the caller can log without enforcing (H-6)"，
+     * ⇒ **它就是为"观察态 + 可归因"设计的**，此处直接复用，不新造。 */
+    #[cfg(feature = "access")]
+    let adm = gw.config.access.as_ref().map(|t| t.admit("", &check.tool));
+
+    let why = {
+        #[cfg(feature = "access")]
+        {
+            match &adm {
+                Some(a) => format!(
+                    "observe_mode; gate=installed; effect={:?} rule={} observe_only={}",
+                    a.effect,
+                    a.rule_id.as_deref().unwrap_or("(default_action)"),
+                    a.observe_only
+                ),
+                None => "observe_mode; gate=none —— 未装配任何准入表（I7：没有装门不得看起来像门通过了）".to_string(),
+            }
+        }
+        #[cfg(not(feature = "access"))]
+        {
+            "observe_mode; gate=none —— 本构建未启用 access feature（I7：没有装门不得看起来像门通过了）".to_string()
+        }
     };
     /* ★ 三个字段 M1a 就用了（而不是等到 M1b）——两个理由：
      * ① 它们是**审计行将来要写的东西**（`args_json` 的脱敏版 + `identity_labels`），

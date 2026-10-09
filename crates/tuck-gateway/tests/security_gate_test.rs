@@ -10,7 +10,7 @@ use axum::http::{Request, StatusCode};
 use axum::routing::post;
 use axum::{Json, Router};
 use serde_json::{json, Value};
-use tuck_gateway::{Gateway, GatewayConfig};
+use tuck_gateway::{AccessConfig, AccessTable, Effect, Gateway, GatewayConfig};
 use tower::ServiceExt;
 
 fn mock_upstream() -> Router {
@@ -66,4 +66,48 @@ async fn gate_reason_names_whether_a_gate_is_installed() {
     let reason = v["reason"].as_str().unwrap_or("");
     assert!(reason.contains("gate=none"), "未装配时必须具名 gate=none，实得: {reason}");
     assert!(reason.contains("index=3"), "应当带上调用方的 index（M1b 审计要用）: {reason}");
+}
+
+/// M1b-2a：**装了准入表 ⇒ `reason` 必须具名（effect / rule_id / observe_only）**。
+///
+/// 这一例刻意构造成"观察态 + 默认拒绝"：**门会拒，但开着观察模式所以放行**。
+/// 它同时演示人类那条纪律：**「只记不拦」≠「不记」** ——
+/// `reason` 里必须看得到"它本来会拒、理由是什么"（否则观察模式就成了静默）。
+#[tokio::test]
+async fn installed_gate_names_its_verdict_even_in_observe_mode() {
+    let table = AccessTable::compile(
+        vec![],
+        AccessConfig { default_action: Effect::Deny, observe_only: true },
+    )
+    .expect("compile");
+    let gw = Gateway::new(GatewayConfig {
+        upstream: "http://127.0.0.1:1/v1".to_string(),
+        access: Some(table),
+        ..Default::default()
+    });
+    let resp = gw
+        .router()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/security/gate")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"job_id":"j1","index":1,"tool":"calc","args_json":"{}"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = resp.status();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let v: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(status, StatusCode::OK);
+    let reason = v["reason"].as_str().unwrap_or("");
+    /* 三件都要看得见：装了门 / 它的裁决 / 它是由哪条规则（或默认动作）得出的。 */
+    assert!(reason.contains("gate=installed"), "必须说清门装上了: {reason}");
+    assert!(reason.contains("effect=Deny"), "必须带判定（本例：默认拒绝）: {reason}");
+    assert!(reason.contains("observe_only=true"), "必须带观察态标记: {reason}");
+    /* 观察态 ⇒ 仍然 pass（不改行为）；但"本来会拒"已经在 reason 里具名。 */
+    assert_eq!(v["decision"], "pass", "观察态应当放行: {v}");
 }
