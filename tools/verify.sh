@@ -15,7 +15,8 @@ step "workspace tests (--all-features)"
 if cargo test --workspace --all-features 2>&1 | tail -40 | grep -qE '^test result: FAILED'; then
   echo "★ RED"; fail=1
 elif cargo test --workspace --all-features >/tmp/tuck_verify_tests.log 2>&1; then
-  echo "OK  ($(grep -cE '^test result: ok' /tmp/tuck_verify_tests.log) 个测试组)"
+  tg_ok=$(grep -cE '^test result: ok' /tmp/tuck_verify_tests.log)
+  echo "OK  (${tg_ok} 个测试组)"
 else
   echo "★ RED（详见 /tmp/tuck_verify_tests.log）"; fail=1
 fi
@@ -30,7 +31,7 @@ errs=$(grep -cE '^error' /tmp/tuck_verify_clippy.log || true)
 # 它不是一条 lint（把它算进去就会像本步第一版那样报"40 条"——一个不可归因的数）。
 warns=$(grep -E '^warning: ' /tmp/tuck_verify_clippy.log | grep -vcE 'generated [0-9]+ warning' || true)
 if [ "${errs:-0}" -gt 0 ]; then echo "★ RED（${errs} error，详见 /tmp/tuck_verify_clippy.log）"; fail=1
-else echo "OK  （存量警告 ${warns} 条 —— 见 KNOWN_ISSUES 的债务行，不判红）"; fi
+else cw=${warns:-0}; echo "OK  （存量警告 ${cw} 条 —— 见 KNOWN_ISSUES 的债务行，不判红）"; fi
 
 # ★ K24 的回归判据（2026-10-09）：**每个 crate 必须能在 --all-features 下【各自】编译**。
 # 为什么这条要单独有：`--all-features` 的语义在【单包】与【工作区】下**不同**（同 K21/D9 的教训）——
@@ -56,6 +57,21 @@ fi
 step "gateway crate realmente 参与编译"
 if cargo build --workspace --all-features >/dev/null 2>&1; then echo "OK"; else echo "★ RED"; fail=1; fi
 
+# ★ 把这次自证写进账本（append-only）。承 adopters 的 P6/P7：
+#   · 只追加、永不改写 · kind: "scan"（生产指标只算 kind: task）· 计数与环境**结构化**且环境**由探测得到**
+#   · **写账失败绝不影响裁决**（打印 WARN，不抛）
+rec(){
+  [ -d ledger ] || return 0
+  local rustc_v cargo_v
+  rustc_v=$(rustc --version 2>/dev/null | tr -d '"' | sed 's/^rustc //')
+  cargo_v=$(cargo --version 2>/dev/null | awk '{print $2}')
+  printf '{"ts":"%s","gate_id":"verify","task":"verify.sh","verdict":"%s","override":false,"source":"cli","event_id":"verify-%s-%s","kind":"scan","counts":{"test_groups_ok":%s,"clippy_warnings":%s},"env":{"rustc":"%s","cargo":"%s","features":"all"},"note":"%s"}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$(date +%s)" "$$" "${2:-0}" "${3:-0}" "$rustc_v" "$cargo_v" "$4" >> ledger/hits-2026.jsonl
+}
 echo
-if [ "$fail" = 0 ]; then echo "TUCK-VERIFY: 全绿"; exit 0; fi
+if [ "$fail" = 0 ]; then
+  rec pass "${tg_ok:-0}" "${cw:-0}" "all green"
+  echo "TUCK-VERIFY: 全绿（已写入 ledger/hits-2026.jsonl）"; exit 0
+fi
+rec block "${tg_ok:-0}" "${cw:-0}" "some step red"
 echo "TUCK-VERIFY: 有步骤红" >&2; exit 1
