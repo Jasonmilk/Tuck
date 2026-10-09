@@ -88,7 +88,7 @@ crates/
 └── 10 健康检查测试（状态/序列化/组件/指标/审计链失败）
 ```
 
-运行测试：`cargo test --workspace`
+运行测试：`cargo test --workspace --all-features`
 运行基准：`cargo bench -p tuck-core`
 
 ## 核心模块
@@ -126,7 +126,7 @@ crates/
 cargo build --workspace
 
 # 测试
-cargo test --workspace
+cargo test --workspace --all-features
 
 # 运行（PFP hex bytes）
 cargo run --bin tuck -- --pfp CF140800

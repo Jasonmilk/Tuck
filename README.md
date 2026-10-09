@@ -173,7 +173,10 @@ tuck-gateway (40 tests)
 ```
 ```
 
-Run tests: `cargo test --workspace`
+Run tests: `cargo test --workspace --all-features`
+<!-- ⚠️ `--all-features` 不是装饰：`tuck-gateway` 是 `optional = true`（按需加载），
+     不带它 `cargo test --workspace` 会【静默跳过整个 gateway 的测试】（含 policy / hitl / access）。
+     「不带 feature 的全绿」≠「全绿」—— 与「没装门不得看起来像门通过了」同一条。 -->
 Run benchmarks: `cargo bench -p tuck-core`
 
 ## Core Modules
@@ -211,7 +214,7 @@ Run benchmarks: `cargo bench -p tuck-core`
 cargo build --workspace
 
 # test
-cargo test --workspace
+cargo test --workspace --all-features
 
 # run (PFP hex bytes)
 cargo run --bin tuck -- --pfp CF140800

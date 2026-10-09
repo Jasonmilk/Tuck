@@ -86,7 +86,7 @@
 - [ ] Tuck 特有验收检查（硬实时 p99 < 1μs、故障注入 100% 拦截、凭证零化、审计篡改检测）
 
 ### 更新后
-- [ ] 测试通过（`cargo test --workspace` 全绿 + 0 warning）
+- [ ] 测试通过（`cargo test --workspace --all-features` 全绿 + 0 warning）
 - [ ] 写 `GROWTH.md`（记录本次生长健康度）
 - [ ] 写 ADR（`docs/decisions/`，如有艰难决策）
 - [ ] 写 `DEPRECATE.md`（如有退役功能）
