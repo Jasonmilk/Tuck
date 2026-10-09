@@ -132,8 +132,63 @@ impl Gateway {
         let state = Arc::new(self);
         Router::new()
             .route("/v1/chat/completions", post(chat_completions))
+            /* M1a（2026-10-09）：把 anaphase 的「做」那道门接上。**先只给端点，不装配**。
+             * 形状逐字对齐 anaphase 的既有契约（`src/security.rs:46` GateCheck /
+             * `adapters/security_gate.rs:57` GateResponse）——**不新造接口**。
+             * M1a 只回答一件事：**这个门在不在**（I7：没有装门不得看起来像门通过了）。 */
+            .route("/v1/security/gate", post(security_gate))
             .with_state(state)
     }
+}
+
+/// anaphase 送来的门检请求（逐字对齐 `anaphase-helix/src/security.rs:46`）。
+#[derive(serde::Deserialize)]
+struct GateCheckIn {
+    #[serde(default)] job_id: String,
+    #[serde(default)] index: u32,
+    #[serde(default)] tool: String,
+    #[serde(default)] args_json: String,
+    #[serde(default)] identity_labels: std::collections::BTreeMap<String, String>,
+}
+
+/// 回给 anaphase 的判定（逐字对齐 `anaphase-helix/src/adapters/security_gate.rs:57`）。
+#[derive(serde::Serialize)]
+struct GateResponseOut {
+    decision: String,
+    reason: String,
+}
+
+/* M1a：**只提供端点，不装配门**。
+ *
+ * 为什么先这样：M1（接门）与 M2（anaphase 装配）必须**分开** —— 一次只让一处变，
+ * 坏了才知道是谁坏的（D8-PLAN §四）。而 M1a 本身要能回答一件事：**门在不在**。
+ *
+ * ★ 它遵守本仓自己的 I7（`pipeline/mod.rs:171`）：**"没有装门"必须明说，不得看起来像门通过了。**
+ *   ⇒ 所以 `reason` 里写清 `gate=none`，而不是返回一个空的 reason 冒充"检查过了"。
+ * ★ 观察态：本阶段一律 `pass`（**不改行为** —— 让 M2 的接线可以独立验证）。
+ *   真正的判定（policy / access / catastrophic）在 M1b 接上；审计行也在 M1b 落（M1 验收②）。 */
+async fn security_gate(Json(check): Json<GateCheckIn>) -> Response {
+    let gate_present = false; /* M1b 会把这里换成 state 里的 access/chain 是否已装 */
+    let why = if gate_present {
+        "observe_mode; gate=installed (verdict 记录但暂不拦 —— M1b 接入策略与审计)"
+    } else {
+        "observe_mode; gate=none —— 未装配任何准入表（I7：没有装门不得看起来像门通过了）"
+    };
+    /* ★ 三个字段 M1a 就用了（而不是等到 M1b）——两个理由：
+     * ① 它们是**审计行将来要写的东西**（`args_json` 的脱敏版 + `identity_labels`），
+     *    现在先出现在 reason 里，M1b 接审计时就不会"忘了带上谁在调用"；
+     * ② 不读它们会被 clippy 报 `never read` —— 而那条警告是**真信号**（M1a 还没判），
+     *    **具名比静默强**：让它在输出里显形，而不是 `#[allow]` 掉。
+     * ⚠️ `args_json` 只报**长度**，不报内容（脱敏的最小形态；真正的 redact 在 M1b 借 Tuck 的 redact 模块）。 */
+    let labels = check.identity_labels.len();
+    let body = GateResponseOut {
+        decision: "pass".to_string(),
+        reason: format!(
+            "{why}; tool={} job={} index={} args_len={} labels={}",
+            check.tool, check.job_id, check.index, check.args_json.len(), labels
+        ),
+    };
+    (StatusCode::OK, Json(body)).into_response()
 }
 
 async fn chat_completions(
