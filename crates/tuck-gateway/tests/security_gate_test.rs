@@ -111,3 +111,53 @@ async fn installed_gate_names_its_verdict_even_in_observe_mode() {
     /* 观察态 ⇒ 仍然 pass（不改行为）；但"本来会拒"已经在 reason 里具名。 */
     assert_eq!(v["decision"], "pass", "观察态应当放行: {v}");
 }
+
+/// M1b-2b：**M1 验收②** —— "每次判定在审计里留下一行"。
+///
+/// ★ 判据刻意**不只断言 reason 字符串**：那只能证明"它说它写了"。
+///   这里在调用后**直接查账本本身**（`next_seq()` = 账本自己报的序号）——
+///   与 Tuck 的原则一致：**呈现的东西必须来自承载者，而不是调用方的声明**。
+#[cfg(feature = "audit")]
+#[tokio::test]
+async fn every_verdict_leaves_a_row_in_the_audit_chain() {
+    use std::sync::{Arc, Mutex};
+    let dir = std::env::temp_dir().join(format!("tuck-gate-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("chain.jsonl");
+    let _ = std::fs::remove_file(&path);
+    let chain = Arc::new(Mutex::new(tuck_audit::AuditChain::open(&path).expect("open")));
+    let before = chain.lock().unwrap().next_seq();
+
+    let gw = Gateway::new(GatewayConfig {
+        upstream: "http://127.0.0.1:1/v1".to_string(),
+        chain: Some(chain.clone()),
+        ..Default::default()
+    });
+    let resp = gw
+        .router()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/security/gate")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"job_id":"j9","index":2,"tool":"calc","args_json":"{}"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let v: Value = serde_json::from_slice(&bytes).unwrap();
+    let reason = v["reason"].as_str().unwrap_or("");
+    assert!(reason.contains("audit=ok seq="), "reason 必须报出落账结果: {reason}");
+
+    /* ① 账本自己报的序号必须前进一行（不是"我说我写了"，是**账本说它多了一行**）。 */
+    let after = chain.lock().unwrap().next_seq();
+    assert_eq!(after, before + 1, "账本序号应当前进 1（before={before} after={after}）");
+
+    /* ② 那行必须真的在文件里，且带着判定的口径（不是一条空记录）。 */
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("security_gate"), "落账行必须带 source: {text}");
+    assert!(text.contains("j9"), "落账行必须带 job_id（可归因）: {text}");
+}

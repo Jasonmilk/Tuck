@@ -111,7 +111,7 @@ pub use token::{Claims, TokenError, issue, verify};
 /// （`access` / `chain`，都是 `Option`），而调用方此前用**裸结构体字面量**构造它 ⇒
 /// **加任何字段都会打破所有既有字面量**（与 proto 加 `system=5` 同形，第 27 条）。
 /// ⇒ 先让 `Default` 存在，构造点一律写 `..Default::default()`，此后的字段扩张就不再是破坏性改动。
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct GatewayConfig {
     /// Upstream OpenAI-compatible base URL (e.g. `http://127.0.0.1:8000/v1`).
     pub upstream: String,
@@ -119,6 +119,24 @@ pub struct GatewayConfig {
     /// 而"没装门"**不是**"空表"（空表拒绝一切，没表只是弃权）。见本仓 I7。
     #[cfg(feature = "access")]
     pub access: Option<AccessTable>,
+    /// 防篡改账本（feature `audit`）。**`None` = 没记账** —— 同 `access`：没装不等于装了个空的。
+    #[cfg(feature = "audit")]
+    pub chain: Option<std::sync::Arc<std::sync::Mutex<tuck_audit::AuditChain>>>,
+}
+
+/* 手写 `Debug`（而非 derive）：`AuditChain` 不实现 `Debug`，而**它本来也不该被打印**——
+ * 账本内部（链头/序号/锚定签名）不是配置的可读面。这里只暴露"**装没装**"：
+ * 与 `access` 同一个口径（`None` = 没装）。 */
+impl std::fmt::Debug for GatewayConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut d = f.debug_struct("GatewayConfig");
+        d.field("upstream", &self.upstream);
+        #[cfg(feature = "access")]
+        d.field("access", &self.access.as_ref().map(|_| "<installed>"));
+        #[cfg(feature = "audit")]
+        d.field("chain", &self.chain.as_ref().map(|_| "<installed>"));
+        d.finish()
+    }
 }
 
 #[derive(Clone)]
@@ -209,10 +227,44 @@ async fn security_gate(State(gw): State<Arc<Gateway>>, Json(check): Json<GateChe
      *    **具名比静默强**：让它在输出里显形，而不是 `#[allow]` 掉。
      * ⚠️ `args_json` 只报**长度**，不报内容（脱敏的最小形态；真正的 redact 在 M1b 借 Tuck 的 redact 模块）。 */
     let labels = check.identity_labels.len();
+
+    /* ★ M1b-2b：落审计行（M1 验收②："每次判定在审计里留下一行 ⇒ 诱骗有迹可循"）。
+     *
+     * 口径与 HTTP 响应**逐字同一套**（decision/reason/tool/rule/observe_only）——
+     * **一物一名**：账本里叫什么、回给 anaphase 的就叫什么，将来对账不必再写映射表。
+     * ⚠️ 锁**不跨 await**（K17 的字段样本正是 MutexGuard 跨 await ⇒ 此处 scope 显式收在块内）。
+     * ⚠️ **写不进去必须显形**：失败不是"没这回事"，而是 `audit=failed: …` 出现在 reason 里。 */
+    #[cfg(feature = "audit")]
+    let audit_note = {
+        match &gw.config.chain {
+            Some(chain) => {
+                let payload = serde_json::json!({
+                    "source": "security_gate",
+                    "job_id": check.job_id,
+                    "index": check.index,
+                    "tool": check.tool,
+                    "args_len": check.args_json.len(),
+                    "labels": labels,
+                    "decision": "pass",
+                    "observe_only": true,
+                    "reason": why,
+                });
+                let rec = { chain.lock().unwrap().append(&tuck_audit::SystemClock, payload) };
+                match rec {
+                    Ok(r) => format!("audit=ok seq={}", r.seq),
+                    Err(e) => format!("audit=failed: {e}"),
+                }
+            }
+            None => "audit=none".to_string(),
+        }
+    };
+    #[cfg(not(feature = "audit"))]
+    let audit_note = "audit=none(no-feature)".to_string();
+
     let body = GateResponseOut {
         decision: "pass".to_string(),
         reason: format!(
-            "{why}; tool={} job={} index={} args_len={} labels={}",
+            "{why}; tool={} job={} index={} args_len={} labels={}; {audit_note}",
             check.tool, check.job_id, check.index, check.args_json.len(), labels
         ),
     };
