@@ -157,6 +157,13 @@ fn hex_lower(bytes: &[u8]) -> String {
 /// replacement (attacker rewrites the whole chain with fresh hashes) passes
 /// [`verify_chain`] but fails [`verify_anchors`] — that is the value of an
 /// external witness.
+/// 一个签名器：字节进 → 签名出。
+///
+/// 抽成名字（而不是把一长串类型写在字段上）有两个用处：字段读起来是**它的用途**，
+/// 而且 `clippy::type_complexity` 不必去问"这串类型是什么意思"。
+/// 行为完全不变（类型别名不产生新类型）。
+pub type Signer = Arc<dyn Fn(&[u8]) -> Vec<u8> + Send + Sync>;
+
 pub struct AuditChain {
     /// Chain file path (kept for read-back queries).
     path: PathBuf,
@@ -168,7 +175,7 @@ pub struct AuditChain {
     #[cfg(feature = "anchor")]
     since_anchor: u64,
     #[cfg(feature = "anchor")]
-    signer: Option<Arc<dyn Fn(&[u8]) -> Vec<u8> + Send + Sync>>,
+    signer: Option<Signer>,
 }
 
 impl AuditChain {
