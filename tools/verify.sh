@@ -32,6 +32,27 @@ warns=$(grep -E '^warning: ' /tmp/tuck_verify_clippy.log | grep -vcE 'generated 
 if [ "${errs:-0}" -gt 0 ]; then echo "★ RED（${errs} error，详见 /tmp/tuck_verify_clippy.log）"; fail=1
 else echo "OK  （存量警告 ${warns} 条 —— 见 KNOWN_ISSUES 的债务行，不判红）"; fi
 
+# ★ K24 的回归判据（2026-10-09）：**每个 crate 必须能在 --all-features 下【各自】编译**。
+# 为什么这条要单独有：`--all-features` 的语义在【单包】与【工作区】下**不同**（同 K21/D9 的教训）——
+# 实测 `cargo build -p tuck-gateway --all-features` 曾报 E0425(cannot find type Arc)，而
+# `cargo build --workspace --all-features` **0 error** ⇒ 自证入口（用 workspace）**看不见**它。
+# 受害者是**单独构建某个 crate 的人/工具**（IDE 索引、`cargo build -p …`、下游消费者）。
+step "每个 crate 各自 --all-features 可编译（K24）"
+k24=$(cargo metadata --no-deps --format-version 1 2>/dev/null | python3 -c '
+import json,sys
+m=json.load(sys.stdin)
+print(" ".join(p["name"] for p in m["packages"]))' 2>/dev/null)
+bad=""
+for pkg in $k24; do
+  cargo build -p "$pkg" --all-features >/tmp/tuck_crate_$$.log 2>&1 || bad="$bad $pkg"
+done
+if [ -n "$bad" ]; then
+  echo "★ RED —— 这些 crate 单独编译失败:${bad}"
+  echo "      （--all-features 在单包下的语义与工作区不同；详见 KNOWN_ISSUES K24）"; fail=1
+else
+  echo "OK  （$(echo $k24 | wc -w | tr -d ' ') 个 crate）"
+fi
+
 step "gateway crate realmente 参与编译"
 if cargo build --workspace --all-features >/dev/null 2>&1; then echo "OK"; else echo "★ RED"; fail=1; fi
 
