@@ -106,7 +106,12 @@ pub mod token;
 pub use token::{Claims, TokenError, issue, verify};
 
 /// Gateway configuration — no magic constants, everything injected.
-#[derive(Debug, Clone)]
+///
+/// **`Default` 是**刻意的**（2026-10-09, K16 M1b-1）**：本结构体将来要加可选字段
+/// （`access` / `chain`，都是 `Option`），而调用方此前用**裸结构体字面量**构造它 ⇒
+/// **加任何字段都会打破所有既有字面量**（与 proto 加 `system=5` 同形，第 27 条）。
+/// ⇒ 先让 `Default` 存在，构造点一律写 `..Default::default()`，此后的字段扩张就不再是破坏性改动。
+#[derive(Debug, Clone, Default)]
 pub struct GatewayConfig {
     /// Upstream OpenAI-compatible base URL (e.g. `http://127.0.0.1:8000/v1`).
     pub upstream: String,

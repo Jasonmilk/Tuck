@@ -21,9 +21,7 @@ fn mock_upstream() -> Router {
 }
 
 async fn call(body: Value) -> (StatusCode, Value) {
-    let gw = Gateway::new(GatewayConfig {
-        upstream: "http://127.0.0.1:1/v1".to_string(),
-    });
+    let gw = Gateway::new(GatewayConfig { upstream: "http://127.0.0.1:1/v1".to_string(), ..Default::default() });
     let app = gw.router();
     let _ = mock_upstream(); /* 保留同一套上游 mock 形状，便于 M1b 接审计后扩展 */
     let resp = app
