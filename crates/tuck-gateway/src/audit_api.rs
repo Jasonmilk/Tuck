@@ -8,14 +8,11 @@
 use std::sync::Arc;
 
 use axum::extract::State;
-use axum::http::StatusCode;
-use axum::Json;
 use axum::response::IntoResponse;
-use serde_json::{json, Value};
+use serde_json::json;
 
 use crate::identity::authenticate;
-use crate::ledger::caller_of;
-use crate::state::{AuthConfig, Pipeline};
+use crate::state::Pipeline;
 
 /// Read-only audit query endpoint (feature `audit`).
 ///

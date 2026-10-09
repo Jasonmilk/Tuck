@@ -124,7 +124,7 @@ impl PolicyMatrix {
         }
     }
 
-    fn category_policy<'a>(&'a self, dest: Destination, cat: Category) -> Option<&'a CategoryPolicy> {
+    fn category_policy(&self, dest: Destination, cat: Category) -> Option<&CategoryPolicy> {
         match cat {
             Category::Mapping => self.row(dest).mapping.as_ref(),
             Category::Guard => self.row(dest).guard.as_ref(),
