@@ -22,6 +22,8 @@ jobs:
           # ★ D11 修补（2026-10-10）：与其余四仓同一耐久修法 —— **失败尾部写进 job summary**
           #   （公开可读，不依赖 artifact 凭据 401 / admin 日志 403）。
           if [ "$rc" != 0 ]; then
+          # ★ 失败具名 → annotations（公开可读）—— 本仓自带脚本（引擎纪律：不跨仓取文件）
+          bash tools/emit-failures.sh /tmp/test.log || true
             echo "--- 末尾 120 行 ---"; tail -120 /tmp/verify.log
             { echo '## 失败尾部'; echo '```'; tail -120 /tmp/verify.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY" || true
           fi
