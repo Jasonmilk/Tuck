@@ -1,0 +1,28 @@
+# Tuck · 最小 CI（R4 补齐，2026-10-10）
+#
+# ★ 本仓的 CI **就是它自己的自证入口** `tools/verify.sh` —— 不另写一套判据。
+#   理由：本仓的规矩是"入口写死 --all-features，否则入口自己就是那个坑"（verify.sh 头注），
+#   而 `--all-features` 与逐 crate 可编译（K24）都已在那条命令里 ⇒ CI 只需**原样重放**它。
+#   "局部绿 ≠ CI 绿" 的反面同样成立：**CI 也不该是第二套判据**。
+name: ci
+on: [push, pull_request]
+jobs:
+  gate:
+    runs-on: ubuntu-24.04   # ★ 钉住（2026-10-10）：ubuntu-latest 将于 2026-10-19 迁到 Ubuntu 26
+                           #   ⇒ 不钉住 = 9 天后由【外部变更】决定我们的红绿（"今天绿"可能纯因环境）
+                           #   冻结是默认；预演 26 应是一次【有意】的实验，不是被动接受
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install stable --profile minimal && rustup default stable
+      - name: TUCK-VERIFY（本仓自证入口，原样重放）
+        run: |
+          set +e
+          bash tools/verify.sh 2>&1 | tee /tmp/verify.log
+          rc=${PIPESTATUS[0]}
+          # ★ D11 修补（2026-10-10）：与其余四仓同一耐久修法 —— **失败尾部写进 job summary**
+          #   （公开可读，不依赖 artifact 凭据 401 / admin 日志 403）。
+          if [ "$rc" != 0 ]; then
+            echo "--- 末尾 120 行 ---"; tail -120 /tmp/verify.log
+            { echo '## 失败尾部'; echo '```'; tail -120 /tmp/verify.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY" || true
+          fi
+          exit $rc

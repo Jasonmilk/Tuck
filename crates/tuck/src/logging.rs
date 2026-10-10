@@ -80,7 +80,7 @@ pub fn init_logging(config: &LogConfig) -> Result<LoggingGuard, LoggingError> {
     let (file_handle, is_file) = if let Some(path) = &config.file_path {
         let file = File::options()
             .create(true)
-            .write(true)
+            
             .append(true)
             .open(path)?;
         (Some(Arc::new(file)), true)

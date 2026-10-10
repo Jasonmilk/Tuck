@@ -106,10 +106,37 @@ pub mod token;
 pub use token::{Claims, TokenError, issue, verify};
 
 /// Gateway configuration — no magic constants, everything injected.
-#[derive(Debug, Clone)]
+///
+/// **`Default` 是**刻意的**（2026-10-09, K16 M1b-1）**：本结构体将来要加可选字段
+/// （`access` / `chain`，都是 `Option`），而调用方此前用**裸结构体字面量**构造它 ⇒
+/// **加任何字段都会打破所有既有字面量**（与 proto 加 `system=5` 同形，第 27 条）。
+/// ⇒ 先让 `Default` 存在，构造点一律写 `..Default::default()`，此后的字段扩张就不再是破坏性改动。
+#[derive(Clone, Default)]
 pub struct GatewayConfig {
     /// Upstream OpenAI-compatible base URL (e.g. `http://127.0.0.1:8000/v1`).
     pub upstream: String,
+    /// 准入表（feature `access`，ADR-0005）。**`None` = 没装门**——
+    /// 而"没装门"**不是**"空表"（空表拒绝一切，没表只是弃权）。见本仓 I7。
+    #[cfg(feature = "access")]
+    pub access: Option<AccessTable>,
+    /// 防篡改账本（feature `audit`）。**`None` = 没记账** —— 同 `access`：没装不等于装了个空的。
+    #[cfg(feature = "audit")]
+    pub chain: Option<std::sync::Arc<std::sync::Mutex<tuck_audit::AuditChain>>>,
+}
+
+/* 手写 `Debug`（而非 derive）：`AuditChain` 不实现 `Debug`，而**它本来也不该被打印**——
+ * 账本内部（链头/序号/锚定签名）不是配置的可读面。这里只暴露"**装没装**"：
+ * 与 `access` 同一个口径（`None` = 没装）。 */
+impl std::fmt::Debug for GatewayConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut d = f.debug_struct("GatewayConfig");
+        d.field("upstream", &self.upstream);
+        #[cfg(feature = "access")]
+        d.field("access", &self.access.as_ref().map(|_| "<installed>"));
+        #[cfg(feature = "audit")]
+        d.field("chain", &self.chain.as_ref().map(|_| "<installed>"));
+        d.finish()
+    }
 }
 
 #[derive(Clone)]
@@ -132,8 +159,116 @@ impl Gateway {
         let state = Arc::new(self);
         Router::new()
             .route("/v1/chat/completions", post(chat_completions))
+            /* M1a（2026-10-09）：把 anaphase 的「做」那道门接上。**先只给端点，不装配**。
+             * 形状逐字对齐 anaphase 的既有契约（`src/security.rs:46` GateCheck /
+             * `adapters/security_gate.rs:57` GateResponse）——**不新造接口**。
+             * M1a 只回答一件事：**这个门在不在**（I7：没有装门不得看起来像门通过了）。 */
+            .route("/v1/security/gate", post(security_gate))
             .with_state(state)
     }
+}
+
+/// anaphase 送来的门检请求（逐字对齐 `anaphase-helix/src/security.rs:46`）。
+#[derive(serde::Deserialize)]
+struct GateCheckIn {
+    #[serde(default)] job_id: String,
+    #[serde(default)] index: u32,
+    #[serde(default)] tool: String,
+    #[serde(default)] args_json: String,
+    #[serde(default)] identity_labels: std::collections::BTreeMap<String, String>,
+}
+
+/// 回给 anaphase 的判定（逐字对齐 `anaphase-helix/src/adapters/security_gate.rs:57`）。
+#[derive(serde::Serialize)]
+struct GateResponseOut {
+    decision: String,
+    reason: String,
+}
+
+/* M1a：**只提供端点，不装配门**。
+ *
+ * 为什么先这样：M1（接门）与 M2（anaphase 装配）必须**分开** —— 一次只让一处变，
+ * 坏了才知道是谁坏的（D8-PLAN §四）。而 M1a 本身要能回答一件事：**门在不在**。
+ *
+ * ★ 它遵守本仓自己的 I7（`pipeline/mod.rs:171`）：**"没有装门"必须明说，不得看起来像门通过了。**
+ *   ⇒ 所以 `reason` 里写清 `gate=none`，而不是返回一个空的 reason 冒充"检查过了"。
+ * ★ 观察态：本阶段一律 `pass`（**不改行为** —— 让 M2 的接线可以独立验证）。
+ *   真正的判定（policy / access / catastrophic）在 M1b 接上；审计行也在 M1b 落（M1 验收②）。 */
+async fn security_gate(State(gw): State<Arc<Gateway>>, Json(check): Json<GateCheckIn>) -> Response {
+    /* ★ M1b-2a：接【准入表】（access）。判定用既有的 `AccessTable::admit(scope, capability)`
+     * （`access.rs:133`），它返回的 `Admission` **自带 `rule_id` 与 `observe_only`** ——
+     * 该结构体的注释写着 "Carried so the caller can log without enforcing (H-6)"，
+     * ⇒ **它就是为"观察态 + 可归因"设计的**，此处直接复用，不新造。 */
+    #[cfg(feature = "access")]
+    let adm = gw.config.access.as_ref().map(|t| t.admit("", &check.tool));
+
+    let why = {
+        #[cfg(feature = "access")]
+        {
+            match &adm {
+                Some(a) => format!(
+                    "observe_mode; gate=installed; effect={:?} rule={} observe_only={}",
+                    a.effect,
+                    a.rule_id.as_deref().unwrap_or("(default_action)"),
+                    a.observe_only
+                ),
+                None => "observe_mode; gate=none —— 未装配任何准入表（I7：没有装门不得看起来像门通过了）".to_string(),
+            }
+        }
+        #[cfg(not(feature = "access"))]
+        {
+            "observe_mode; gate=none —— 本构建未启用 access feature（I7：没有装门不得看起来像门通过了）".to_string()
+        }
+    };
+    /* ★ 三个字段 M1a 就用了（而不是等到 M1b）——两个理由：
+     * ① 它们是**审计行将来要写的东西**（`args_json` 的脱敏版 + `identity_labels`），
+     *    现在先出现在 reason 里，M1b 接审计时就不会"忘了带上谁在调用"；
+     * ② 不读它们会被 clippy 报 `never read` —— 而那条警告是**真信号**（M1a 还没判），
+     *    **具名比静默强**：让它在输出里显形，而不是 `#[allow]` 掉。
+     * ⚠️ `args_json` 只报**长度**，不报内容（脱敏的最小形态；真正的 redact 在 M1b 借 Tuck 的 redact 模块）。 */
+    let labels = check.identity_labels.len();
+
+    /* ★ M1b-2b：落审计行（M1 验收②："每次判定在审计里留下一行 ⇒ 诱骗有迹可循"）。
+     *
+     * 口径与 HTTP 响应**逐字同一套**（decision/reason/tool/rule/observe_only）——
+     * **一物一名**：账本里叫什么、回给 anaphase 的就叫什么，将来对账不必再写映射表。
+     * ⚠️ 锁**不跨 await**（K17 的字段样本正是 MutexGuard 跨 await ⇒ 此处 scope 显式收在块内）。
+     * ⚠️ **写不进去必须显形**：失败不是"没这回事"，而是 `audit=failed: …` 出现在 reason 里。 */
+    #[cfg(feature = "audit")]
+    let audit_note = {
+        match &gw.config.chain {
+            Some(chain) => {
+                let payload = serde_json::json!({
+                    "source": "security_gate",
+                    "job_id": check.job_id,
+                    "index": check.index,
+                    "tool": check.tool,
+                    "args_len": check.args_json.len(),
+                    "labels": labels,
+                    "decision": "pass",
+                    "observe_only": true,
+                    "reason": why,
+                });
+                let rec = { chain.lock().unwrap().append(&tuck_audit::SystemClock, payload) };
+                match rec {
+                    Ok(r) => format!("audit=ok seq={}", r.seq),
+                    Err(e) => format!("audit=failed: {e}"),
+                }
+            }
+            None => "audit=none".to_string(),
+        }
+    };
+    #[cfg(not(feature = "audit"))]
+    let audit_note = "audit=none(no-feature)".to_string();
+
+    let body = GateResponseOut {
+        decision: "pass".to_string(),
+        reason: format!(
+            "{why}; tool={} job={} index={} args_len={} labels={}; {audit_note}",
+            check.tool, check.job_id, check.index, check.args_json.len(), labels
+        ),
+    };
+    (StatusCode::OK, Json(body)).into_response()
 }
 
 async fn chat_completions(

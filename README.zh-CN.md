@@ -8,9 +8,59 @@
 
 ---
 
+
+## ▸ 从这里开始（**按需指针**：先看你要回答的**问题**，只取那一份）
+
+> **状态是【量出来】的，不是存在这里的**（徽章与计数是快照，会腐 ⇒ 以自证命令为准）。
+
+| 我要回答的问题 | 读这一份 |
+|---|---|
+| **本仓现在健康吗？怎么自证？** | `bash tools/verify.sh`（判读：`exit 0` + `TUCK-VERIFY: 全绿`；其中含**每个 crate 各自 `--all-features` 可编译**） |
+| **运行/探针的账在哪？** | `ledger/`（append-only，见 `ledger/README.md`） |
+| **「做」那道门现在是什么状态？** | `POST /v1/security/gate`（**观察态**：未装配准入表时回 `pass` 并**具名 `gate=none`**） |
+| **遇到怪事 / 是否已知？** | `helix-mind/docs/helixECO/KNOWN_ISSUES.md`（唯一跨仓登记册） |
+| **我们现在在哪？下一步？** | `helix-mind/docs/helixECO/STATUS-2026-10-10.md` |
+
 ## 一句话定位
 
 **Tuck 是 Helix 的免疫系统——用 4 字节 PFP 物理特征，在亚微秒内做出放行/拦截/人类确认的决策。它不思考、不编排、不执行，只过滤。**
+
+## ▸ 从这里开始 —— 怎么自证，记录在哪里
+
+新人真正会问两件事：**"这个仓现在健康吗？"** 与 **"凭据（记录）在哪？"**
+两者都用**指针**回答，不用散文（事实的第二份副本会漂，指针不会）。
+
+### ① 自证 —— 一条命令，而且它自己写记录
+
+```bash
+bash tools/verify.sh
+```
+
+它跑：workspace 测试（`--all-features`）· clippy（**报告存量债务，只对 `error` 判红**）·
+**每个 crate 各自用 `--all-features` 编译**（见 K24：**工作区全绿可以掩盖某个 crate 根本编不过**）·
+以及 gateway crate 确实参与编译。**判读：exit 0 + `TUCK-VERIFY: 全绿`。**
+
+### ② 记录在哪（各自是干什么的）
+
+| 位置 | 它是什么 | 什么时候读 |
+|---|---|---|
+| **`ledger/`**（+ `ledger/README.md`） | **append-only** 运行账本。`tools/verify.sh` 每次自证写一行：**真实的 `counts`** + **探测来的 `env`**（rustc/cargo/features）。**只有 `kind: task` 计入生产指标。** | 想知道**运行历史**，或写账的规矩 |
+| **`tools/verify.sh`** | 自证本身 —— **是闸门，不是对闸门的描述** | 总是；它是入口 |
+| **`ledger/hits-2026.jsonl`** | 原始行（一行一条 JSON） | 要审计某一次运行 |
+| **`helix-mind/docs/helixECO/KNOWN_ISSUES.md`** | **唯一**的跨仓缺陷登记册（每行给出**为什么还没修**，并区分 **【待裁决】** 与 **【没人做】**） | 遇到怪事、想知道是否已知 |
+| **`helix-mind/docs/helixECO/HANDOFF.md`** | ≤40 行的**入口指针**（状态是**量出来的**，不存） | 刚进生态、需要唯一入口 |
+
+**与 Tuck 相关的生态条目**（都在 `KNOWN_ISSUES.md`）：**K16**（"做"那道门：Tuck 的
+`POST /v1/security/gate` + anaphase 的装配）· **K21**（存量 clippy 债务）· **K24**（单 crate 构建
+vs 工作区构建）· **K25**（那套"偶尔红"：被 drop 的 shutdown 发送端静默停掉了 mock）·
+**K26**（执行期失败必须留下**具名的行**，而不是被咽掉的 `warn!`）。
+
+### ③ 本轮**新为真**的事（免得把本文件读成全部）
+
+- **`POST /v1/security/gate`** —— "做"那道门。**现为观察态**：未装配准入表时回答 `pass`
+  **并具名 `gate=none`**（**没装门不得看起来像门通过了**）。每次判定落一行审计，用**与 HTTP 响应同一套词汇**（一物一名）。
+- **`ledger/`** —— Tuck 早就有验证，但**不留痕**；现在留了。
+- **`tools/verify.sh`** —— 上面那条自证。
 
 ## 核心承诺
 
@@ -88,7 +138,7 @@ crates/
 └── 10 健康检查测试（状态/序列化/组件/指标/审计链失败）
 ```
 
-运行测试：`cargo test --workspace`
+运行测试：`cargo test --workspace --all-features`
 运行基准：`cargo bench -p tuck-core`
 
 ## 核心模块
@@ -126,7 +176,7 @@ crates/
 cargo build --workspace
 
 # 测试
-cargo test --workspace
+cargo test --workspace --all-features
 
 # 运行（PFP hex bytes）
 cargo run --bin tuck -- --pfp CF140800

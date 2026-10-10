@@ -43,7 +43,7 @@ async fn spawn_gateway() -> (Router, reqwest::Client) {
         axum::serve(listener, mock_upstream()).await.unwrap();
     });
     let upstream = format!("http://{addr}/v1");
-    let router = Gateway::new(GatewayConfig { upstream }).router();
+    let router = Gateway::new(GatewayConfig { upstream, ..Default::default() }).router();
     (router, reqwest::Client::new())
 }
 
@@ -118,9 +118,7 @@ async fn auth_header_forwarded() {
 #[tokio::test]
 async fn gateway_failure_returns_bad_gateway() {
     // Point at a dead port.
-    let router = Gateway::new(GatewayConfig {
-        upstream: "http://127.0.0.1:9/v1".to_string(),
-    })
+    let router = Gateway::new(GatewayConfig { upstream: "http://127.0.0.1:9/v1".to_string(), ..Default::default() })
     .router();
 
     let resp = router

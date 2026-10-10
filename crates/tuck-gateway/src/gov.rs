@@ -36,19 +36,16 @@ use axum::body::Body;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::{Json, Router};
+use axum::Json;
 use serde_json::{json, Value};
 
-use crate::matrix::{Destination, PolicyMatrix, Transform, decide};
-use crate::policy::RuleSet;
-use crate::state::{AuthConfig, Caller, GatewayState, Pipeline};
+use crate::matrix::{Transform, decide};
+use crate::state::Pipeline;
 use crate::identity::{authenticate, destination_of, session_of};
 use crate::ledger::{caller_of, record};
 // Single source of truth for the placeholder shape: the SSE carry below must
 // never re-spell `P_` or assume how wide a placeholder is.
 use crate::redact::{PLACEHOLDER_MIN_DIGITS, PLACEHOLDER_PREFIX};
-#[cfg(feature = "audit")]
-use crate::audit_api::{audit_query, audit_stats};
 #[cfg(feature = "access")]
 use crate::notify::{Denial, fanout};
 
@@ -330,10 +327,7 @@ pub async fn governed_chat(
                                     "session": session,
                                     "caller": caller,
                                 }));
-                                match final_chunk {
-                                    Some(c) => Some((c, (stream, String::new()))),
-                                    None => None,
-                                }
+                                final_chunk.map(|c| (c, (stream, String::new())))
                             }
                         }
                         }

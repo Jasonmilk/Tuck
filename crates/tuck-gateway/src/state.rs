@@ -190,7 +190,7 @@ impl GatewayState {
 
     pub(crate) fn session_table(&self, session: &str) -> std::sync::MutexGuard<'_, HashMap<String, MappingTable>> {
         let mut tables = self.tables.lock().expect("table lock");
-        tables.entry(session.to_string()).or_insert_with(MappingTable::new);
+        tables.entry(session.to_string()).or_default();
         tables
     }
 }

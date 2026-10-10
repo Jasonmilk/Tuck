@@ -12,6 +12,45 @@
 
 **Tuck is Helix's immune system — using the 4-byte PFP physical features, it makes pass/intercept/human-confirm decisions in sub-microseconds. It does not think, does not orchestrate, does not execute. It only filters.**
 
+## ▸ Start Here — how to prove it, and where the records are
+
+**Two questions a newcomer actually has: "is this repo healthy right now?" and "where are the receipts?"**
+Both are answered by **pointers, not prose** (a second copy of a fact drifts; a pointer does not).
+
+### ① Self-check — one command, and it writes its own record
+
+```bash
+bash tools/verify.sh
+```
+
+It runs: workspace tests (`--all-features`) · clippy (reports the standing debt, judges only `error` red) ·
+**each crate compiled independently with `--all-features`** (see K24: a workspace-green build can hide a
+crate that does not compile) · and confirms the `gateway` crate participates in compilation.
+**Verdict: exit 0 + `TUCK-VERIFY: 全绿`.**
+
+### ② Records — where they live, and what each is for
+
+| Where | What it is | Read it when |
+|---|---|---|
+| **`ledger/`** (+ `ledger/README.md`) | **Append-only** run ledger. `tools/verify.sh` writes one structured row per run: real `counts` + **probed** `env` (rustc/cargo/features). Only `kind: task` counts toward production metrics. | you want the *history* of runs, or the rule for writing them |
+| **`tools/verify.sh`** | the self-check itself — **the gate, not a description of a gate** | always; it is the entry point |
+| **`ledger/hits-2026.jsonl`** | the raw rows (one JSON object per line) | you need to audit a specific run |
+| **`helix-mind/docs/helixECO/KNOWN_ISSUES.md`** | the **single** cross-repo defect register (per row: *why it is not fixed yet*, distinguishing **needs a human ruling** from **nobody has done it**) | you hit something odd and want to know whether it is already known |
+| **`helix-mind/docs/helixECO/HANDOFF.md`** | the ≤40-line **entry pointer** (state is *derived by commands*, never stored) | you are new to the ecosystem and need the one entrance |
+
+**Ecosystem items involving Tuck** (all in `KNOWN_ISSUES.md`): **K16** (the door on "do": Tuck's
+`POST /v1/security/gate` + anaphase's wiring) · **K21** (standing clippy debt) · **K24** (single-crate build
+vs workspace build) · **K25** (the "flaky" suite: a dropped shutdown sender silently stopped the mock) ·
+**K26** (an execution failure must leave a **named row**, not a swallowed `warn!`).
+
+### ③ What is *newly* true (so this file is not read as the whole story)
+
+- **`POST /v1/security/gate`** — the door on "do". **Observation-only for now**: with no admission table
+  installed it answers `pass` **and names `gate=none`** (an absent door must not look like a door that passed).
+  One audit row per verdict, in the same vocabulary it returns over HTTP (one name, one thing).
+- **`ledger/`** — Tuck already had verification; it left no trace. Now it does.
+- **`tools/verify.sh`** — the self-check above.
+
 ## Core Commitments
 
 | # | Commitment | Meaning | Acceptance criteria |
@@ -173,7 +212,10 @@ tuck-gateway (40 tests)
 ```
 ```
 
-Run tests: `cargo test --workspace`
+Run tests: `cargo test --workspace --all-features`
+<!-- ⚠️ `--all-features` 不是装饰：`tuck-gateway` 是 `optional = true`（按需加载），
+     不带它 `cargo test --workspace` 会【静默跳过整个 gateway 的测试】（含 policy / hitl / access）。
+     「不带 feature 的全绿」≠「全绿」—— 与「没装门不得看起来像门通过了」同一条。 -->
 Run benchmarks: `cargo bench -p tuck-core`
 
 ## Core Modules
@@ -211,7 +253,7 @@ Run benchmarks: `cargo bench -p tuck-core`
 cargo build --workspace
 
 # test
-cargo test --workspace
+cargo test --workspace --all-features
 
 # run (PFP hex bytes)
 cargo run --bin tuck -- --pfp CF140800
@@ -245,7 +287,12 @@ Byte 3:
 
 **Rule 6**: when Replay-Enable=0, the effective Risk-Level is forcibly downgraded to MEDIUM (replay-attack protection).
 
-## Development Plan
+## Development Plan（**historical**: P0–P7 is the plan as of project start）
+
+> ⚠️ This table is the **plan at project start**, **not current state**. For current state use
+> `bash tools/verify.sh` (**measure it**) or read the run history in `ledger/`.
+> **Two statuses living side by side drift** — that is exactly the disease this repo keeps paying for.
+
 
 | Stage | Content | Status |
 |---|---|---|

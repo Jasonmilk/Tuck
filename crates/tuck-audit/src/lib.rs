@@ -157,6 +157,19 @@ fn hex_lower(bytes: &[u8]) -> String {
 /// replacement (attacker rewrites the whole chain with fresh hashes) passes
 /// [`verify_chain`] but fails [`verify_anchors`] — that is the value of an
 /// external witness.
+/// 一个签名器：字节进 → 签名出。
+///
+/// ⚠️ **它与 `use std::sync::Arc` 同属 `anchor` feature**（那个 use 也被 cfg 门住）——
+/// 第一版漏了这道门，于是当 `anchor` 关闭时 `Arc` 不在作用域 ⇒ E0425。
+/// **而 `cargo build --workspace --all-features` 看不见它**（feature 统一会从别处打开 anchor）——
+/// 只有 `cargo build -p tuck-audit --all-features` 才露出来。⇒ 已加入 verify.sh 的逐 crate 判据（K24）。
+///
+/// 抽成名字（而不是把一长串类型写在字段上）有两个用处：字段读起来是**它的用途**，
+/// 而且 `clippy::type_complexity` 不必去问"这串类型是什么意思"。
+/// 行为完全不变（类型别名不产生新类型）。
+#[cfg(feature = "anchor")]
+pub type Signer = Arc<dyn Fn(&[u8]) -> Vec<u8> + Send + Sync>;
+
 pub struct AuditChain {
     /// Chain file path (kept for read-back queries).
     path: PathBuf,
@@ -168,7 +181,7 @@ pub struct AuditChain {
     #[cfg(feature = "anchor")]
     since_anchor: u64,
     #[cfg(feature = "anchor")]
-    signer: Option<Arc<dyn Fn(&[u8]) -> Vec<u8> + Send + Sync>>,
+    signer: Option<Signer>,
 }
 
 impl AuditChain {

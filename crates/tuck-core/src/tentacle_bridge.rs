@@ -402,6 +402,11 @@ impl TuckPluginAuditor {
         };
 
         // Step 4: Combine decisions (most restrictive wins)
+        /* `clippy::if_same_then_else` 会在这里报"两块相同"——**那是假警告，故具名 allow**：
+         * 两个条件是两个**不同的事实**（"完整性没验过" 与 "权限裁决是 Reject"），只是**裁决恰好相同**。
+         * 折叠它们会丢掉那个区分，而区分正是审计要读的东西（哪一条原因导致 Reject）。
+         * ⇒ 与"未测量 ≠ 通过"同族：**值相同不等于事实相同。**（2026-10-09） */
+        #[allow(clippy::if_same_then_else)]
         let decision = if !integrity_verified {
             PluginAuditDecision::Reject
         } else if permission_decision == PluginAuditDecision::Reject {
