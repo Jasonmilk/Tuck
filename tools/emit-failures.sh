@@ -8,8 +8,22 @@
 #
 # 用法（在 `run:` 里，失败分支内）：bash path/to/emit-failures.sh /tmp/test.log
 set -uo pipefail
-log="${1:?用法: emit-failures.sh <日志文件>}"
-[ -f "$log" ] || { echo "::warning title=失败具名跳过::找不到日志 $log（判读不了，不等于没有失败）"; exit 0; }
+log="${1:-}"
+# ★ 韧性（2026-10-10 实测教训 · 由豆包在 Cellrix 实证）：调用方把日志路径**写死**过，而各仓 tee 的目标不同
+#   （Cellrix=/tmp/rust-gate.log · Tuck=/tmp/verify.log · anaphase=/tmp/test.log）
+#   ⇒ emit 每次打"找不到日志" ⇒ **失败名从未进 annotations**（"红没有故事"）⇒ 根因不可见。
+#   **改工具，不改小心**：给什么都不怕 —— 路径缺失就自己找（取 /tmp 下最新的 *.log），并**明说用了哪个**。
+if [ -n "$log" ] && [ ! -f "$log" ]; then
+  echo "::notice title=失败具名::传入的日志 $log 不存在 ⇒ 自动发现最新 /tmp/*.log"
+  log=""
+fi
+if [ -z "$log" ] || [ ! -f "$log" ]; then
+  log="$(ls -t /tmp/*.log 2>/dev/null | head -1 || true)"
+fi
+if [ -z "$log" ] || [ ! -f "$log" ]; then
+  echo "::warning title=失败具名跳过::/tmp 下没有任何 *.log（判读不了，不等于没有失败）"; exit 0
+fi
+echo "::notice title=失败具名::读取 $log"
 {
   grep -aE "^test .* FAILED|^failures:$|panicked at|^error(\[|:)|No such file|NotFound|Could not find|cannot find|^assertion|CHECKER ERROR" "$log" | head -12
   grep -aA4 "panicked at" "$log" | grep -avE "^--|^\s*$" | head -14
