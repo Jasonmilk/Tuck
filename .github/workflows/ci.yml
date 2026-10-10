@@ -1,0 +1,16 @@
+# Tuck · 最小 CI（R4 补齐，2026-10-10）
+#
+# ★ 本仓的 CI **就是它自己的自证入口** `tools/verify.sh` —— 不另写一套判据。
+#   理由：本仓的规矩是"入口写死 --all-features，否则入口自己就是那个坑"（verify.sh 头注），
+#   而 `--all-features` 与逐 crate 可编译（K24）都已在那条命令里 ⇒ CI 只需**原样重放**它。
+#   "局部绿 ≠ CI 绿" 的反面同样成立：**CI 也不该是第二套判据**。
+name: ci
+on: [push, pull_request]
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install stable --profile minimal && rustup default stable
+      - name: TUCK-VERIFY（本仓自证入口，原样重放）
+        run: bash tools/verify.sh
