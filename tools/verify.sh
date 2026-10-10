@@ -54,8 +54,19 @@ else
   echo "OK  （$(echo $k24 | wc -w | tr -d ' ') 个 crate）"
 fi
 
-step "gateway crate realmente 参与编译"
-if cargo build --workspace --all-features >/dev/null 2>&1; then echo "OK"; else echo "★ RED"; fail=1; fi
+# ★ 修（2026-10-09）：这一步此前叫「gateway crate 参与编译」，却在跑 `--workspace --all-features` ——
+#   **名字承诺一件事、命令做另一件事**（声明代替检查的一种），而且 `>/dev/null 2>&1` 让红**没有原因**。
+#   实测：它曾报过一次 ★ RED，而同一命令手跑 exit=0 ⇒ 不可归因的红 = 比红更糟（它会教人重跑直到绿）。
+#   ⇒ 改成**名实相符**：`gateway` feature 属于 `tuck` 包，故用 `-p tuck --features gateway` 验证
+#      "该 feature 真的把 tuck-gateway 拉进编译"；失败时**打印末尾几行**（红必须带原因）。
+step "gateway feature 真的把 tuck-gateway 拉进编译"
+if out=$(cargo build -p tuck --features gateway 2>&1); then
+  echo "OK  （tuck --features gateway）"
+else
+  echo "★ RED"
+  printf '%s\n' "$out" | tail -12 | sed 's/^/    /'
+  fail=1
+fi
 
 # ★ 把这次自证写进账本（append-only）。承 adopters 的 P6/P7：
 #   · 只追加、永不改写 · kind: "scan"（生产指标只算 kind: task）· 计数与环境**结构化**且环境**由探测得到**
