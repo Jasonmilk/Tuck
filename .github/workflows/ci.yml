@@ -13,4 +13,14 @@ jobs:
       - uses: actions/checkout@v4
       - run: rustup toolchain install stable --profile minimal && rustup default stable
       - name: TUCK-VERIFY（本仓自证入口，原样重放）
-        run: bash tools/verify.sh
+        run: |
+          set +e
+          bash tools/verify.sh 2>&1 | tee /tmp/verify.log
+          rc=${PIPESTATUS[0]}
+          # ★ D11 修补（2026-10-10）：与其余四仓同一耐久修法 —— **失败尾部写进 job summary**
+          #   （公开可读，不依赖 artifact 凭据 401 / admin 日志 403）。
+          if [ "$rc" != 0 ]; then
+            echo "--- 末尾 120 行 ---"; tail -120 /tmp/verify.log
+            { echo '## 失败尾部'; echo '```'; tail -120 /tmp/verify.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY" || true
+          fi
+          exit $rc
