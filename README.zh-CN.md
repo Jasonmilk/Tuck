@@ -8,6 +8,19 @@
 
 ---
 
+
+## ▸ 从这里开始（**按需指针**：先看你要回答的**问题**，只取那一份）
+
+> **状态是【量出来】的，不是存在这里的**（徽章与计数是快照，会腐 ⇒ 以自证命令为准）。
+
+| 我要回答的问题 | 读这一份 |
+|---|---|
+| **本仓现在健康吗？怎么自证？** | `bash tools/verify.sh`（判读：`exit 0` + `TUCK-VERIFY: 全绿`；其中含**每个 crate 各自 `--all-features` 可编译**） |
+| **运行/探针的账在哪？** | `ledger/`（append-only，见 `ledger/README.md`） |
+| **「做」那道门现在是什么状态？** | `POST /v1/security/gate`（**观察态**：未装配准入表时回 `pass` 并**具名 `gate=none`**） |
+| **遇到怪事 / 是否已知？** | `helix-mind/docs/helixECO/KNOWN_ISSUES.md`（唯一跨仓登记册） |
+| **我们现在在哪？下一步？** | `helix-mind/docs/helixECO/STATUS-2026-10-10.md` |
+
 ## 一句话定位
 
 **Tuck 是 Helix 的免疫系统——用 4 字节 PFP 物理特征，在亚微秒内做出放行/拦截/人类确认的决策。它不思考、不编排、不执行，只过滤。**
