@@ -171,7 +171,6 @@ mod audit_ledger {
     use axum::Json;
     use axum::Router;
     use serde_json::{json, Value};
-    use std::path::PathBuf;
 
     fn mock_upstream() -> Router {
         Router::new().route(
@@ -188,7 +187,7 @@ mod audit_ledger {
             axum::serve(listener, mock_upstream()).await.unwrap();
         });
 
-        let chain_path = PathBuf::from(std::env::temp_dir()).join("tuck-gov-audit-test.jsonl");
+        let chain_path = std::env::temp_dir().join("tuck-gov-audit-test.jsonl");
         let _ = std::fs::remove_file(&chain_path);
         let chain = tuck_audit::AuditChain::open(&chain_path).unwrap();
 

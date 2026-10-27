@@ -22,19 +22,14 @@ use crate::audit::AuditEntry;
 // ============================================================================
 
 /// Sort order for query results.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SortOrder {
     /// Oldest first (ascending by timestamp).
     Ascending,
     /// Newest first (descending by timestamp).
+    #[default]
     Descending,
-}
-
-impl Default for SortOrder {
-    fn default() -> Self {
-        Self::Descending // default: newest first
-    }
 }
 
 /// Audit query — filter and pagination parameters.
@@ -221,7 +216,7 @@ impl Queryable for crate::audit::AuditLog {
                 matching.sort_by_key(|e| e.timestamp);
             }
             SortOrder::Descending => {
-                matching.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+                matching.sort_by_key(|e| std::cmp::Reverse(e.timestamp));
             }
         }
 
@@ -262,7 +257,10 @@ mod tests {
         use crate::audit::GENESIS_HASH;
         let mut log = AuditLog::new();
 
-        // Helper to create an entry with a specific timestamp
+        // Helper to create an entry with a specific timestamp.
+        // 9 参数是夹具属性：每个参数对应 AuditEntry 的一个独立字段，包成 struct 只会把
+        // 调用点变成一堆字段名重写，不增加任何约束力 ⇒ 具名豁免，不是漏改。
+        #[allow(clippy::too_many_arguments)]
         fn make_entry(
             id: u8,
             timestamp: u64,

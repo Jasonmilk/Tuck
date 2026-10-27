@@ -456,7 +456,7 @@ mod tests {
 
     #[test]
     fn test_frame_parse_with_pfp() {
-        let pfp = [0xCF, 0x14, 0b00_01_10_11, 0b1_1_1_00000];
+        let pfp = [0xCF, 0x14, 0b00_01_10_11, 0b1110_0000];
         let frame_bytes = FrameBuilder::new()
             .with_seq(42)
             .with_pfp(pfp)
@@ -503,7 +503,7 @@ mod tests {
 
     #[test]
     fn test_frame_extract_pfp() {
-        let pfp = [0xCF, 0x14, 0b10_11_00_01, 0b0_1_0_00000];
+        let pfp = [0xCF, 0x14, 0b10_11_00_01, 0b0100_0000];
         let frame_bytes = FrameBuilder::new()
             .with_pfp(pfp)
             .build();

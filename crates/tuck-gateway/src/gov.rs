@@ -213,9 +213,9 @@ pub async fn governed_chat(
                 msg["content"] = json!(redacted);
                 governed.push(msg);
                 // Placeholders only — safe for the audit chain.
-                governance.last_mut().map(|g| {
-                    g["redactions"] = json!(repls.iter().map(|r| &r.placeholder).collect::<Vec<_>>())
-                });
+                if let Some(g) = governance.last_mut() {
+                    g["redactions"] = json!(repls.iter().map(|r| &r.placeholder).collect::<Vec<_>>());
+                }
             } else {
                 governed.push(msg.clone());
             }

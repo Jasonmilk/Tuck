@@ -207,9 +207,13 @@ impl FileCredentialStore {
 
     /// Save credentials to encrypted file.
     pub async fn save(&self) -> Result<(), CredentialError> {
-        let credentials = self.credentials.lock().unwrap();
-        let plaintext = serde_json::to_vec(&*credentials)
-            .map_err(|e| CredentialError::Store(format!("serialization error: {e}")))?;
+        // 只把序列化结果带出锁作用域：后面全是 .await（写临时文件 + rename），
+        // 锁没有必要敲到 await 对面。行为等价（读到的仍是同一份 map 快照）。
+        let plaintext = {
+            let credentials = self.credentials.lock().unwrap();
+            serde_json::to_vec(&*credentials)
+                .map_err(|e| CredentialError::Store(format!("serialization error: {e}")))?
+        };
 
         // Generate random nonce
         let mut nonce_bytes = [0u8; 12];
@@ -296,7 +300,7 @@ impl CredentialStore for FileCredentialStore {
 
 fn base64_encode(input: &[u8]) -> String {
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut result = String::with_capacity((input.len() + 2) / 3 * 4);
+    let mut result = String::with_capacity(input.len().div_ceil(3) * 4);
 
     for chunk in input.chunks(3) {
         let b0 = chunk[0] as u32;

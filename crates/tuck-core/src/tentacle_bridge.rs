@@ -92,19 +92,14 @@ pub struct PluginAuditRequest {
 }
 
 /// Plugin security level (mirrors Tentacle's SecurityLevel).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PluginSecurityLevel {
     /// Normal operations (read-only, low risk).
+    #[default]
     Normal,
     /// Critical operations (write/network/credential use, needs HITL).
     Critical,
-}
-
-impl Default for PluginSecurityLevel {
-    fn default() -> Self {
-        Self::Normal
-    }
 }
 
 /// Plugin permissions (mirrors Tentacle's Permission struct).

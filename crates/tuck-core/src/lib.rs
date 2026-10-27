@@ -100,43 +100,43 @@ impl PfpHeader {
     /// Operation modality (bit 0-1 of byte 2).
     #[inline]
     pub fn modality(&self) -> Modality {
-        Modality::from((self.raw[2] & 0b11) as u8)
+        Modality::from(self.raw[2] & 0b11)
     }
 
     /// Risk level (bit 2-3 of byte 2).
     #[inline]
     pub fn risk_level(&self) -> RiskLevel {
-        RiskLevel::from(((self.raw[2] >> 2) & 0b11) as u8)
+        RiskLevel::from((self.raw[2] >> 2) & 0b11)
     }
 
     /// Body stance (bit 4-5 of byte 2).
     #[inline]
     pub fn body_stance(&self) -> BodyStance {
-        BodyStance::from(((self.raw[2] >> 4) & 0b11) as u8)
+        BodyStance::from((self.raw[2] >> 4) & 0b11)
     }
 
     /// Proximity edge (bit 6-7 of byte 2).
     #[inline]
     pub fn proximity_edge(&self) -> ProximityEdge {
-        ProximityEdge::from(((self.raw[2] >> 6) & 0b11) as u8)
+        ProximityEdge::from((self.raw[2] >> 6) & 0b11)
     }
 
     /// Output destination (bit 0 of byte 3).
     #[inline]
     pub fn output_dest(&self) -> OutputDest {
-        OutputDest::from((self.raw[3] & 0b1) as u8)
+        OutputDest::from(self.raw[3] & 0b1)
     }
 
     /// Override flag (bit 1 of byte 3).
     #[inline]
     pub fn override_flag(&self) -> OverrideFlag {
-        OverrideFlag::from(((self.raw[3] >> 1) & 0b1) as u8)
+        OverrideFlag::from((self.raw[3] >> 1) & 0b1)
     }
 
     /// Replay enable (bit 2 of byte 3).
     #[inline]
     pub fn replay_enable(&self) -> ReplayEnable {
-        ReplayEnable::from(((self.raw[3] >> 2) & 0b1) as u8)
+        ReplayEnable::from((self.raw[3] >> 2) & 0b1)
     }
 
     /// Effective risk level, applying Rule 6 downgrade.

@@ -301,6 +301,13 @@ pub struct InMemoryCredentialStore {
 }
 
 #[cfg(any(test, feature = "test-utils"))]
+impl Default for InMemoryCredentialStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(any(test, feature = "test-utils"))]
 impl InMemoryCredentialStore {
     /// Create an empty in-memory store.
     pub fn new() -> Self {

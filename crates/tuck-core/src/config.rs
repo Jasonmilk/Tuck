@@ -85,7 +85,7 @@ pub enum ConfigError {
 // ============================================================================
 
 /// Tuck server configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TuckConfig {
     /// Server configuration.
     #[serde(default)]
@@ -122,22 +122,6 @@ pub struct TuckConfig {
     /// Metrics configuration.
     #[serde(default)]
     pub metrics: MetricsConfig,
-}
-
-impl Default for TuckConfig {
-    fn default() -> Self {
-        Self {
-            server: ServerConfig::default(),
-            gateway: GatewayConfig::default(),
-            security: SecurityConfig::default(),
-            audit: AuditConfig::default(),
-            credential: CredentialConfig::default(),
-            hsm: HsmConfig::default(),
-            hot_reload: HotReloadConfig::default(),
-            log: LogConfig::default(),
-            metrics: MetricsConfig::default(),
-        }
-    }
 }
 
 impl TuckConfig {
@@ -329,7 +313,7 @@ pub struct UpstreamEntry {
 ///
 /// Every LLM traffic gate in the ecosystem is assembled here: Tuck is the
 /// only door. Listen host/port reuse `server` (single service port, 极致复用).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GatewayConfig {
     /// Serve the governance gateway on startup.
     #[serde(default)]
@@ -358,21 +342,6 @@ pub struct GatewayConfig {
     /// Detection rules JSON file path (array of `Rule`). Empty = no rules.
     #[serde(default)]
     pub rules_path: String,
-}
-
-impl Default for GatewayConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            upstream: String::new(),
-            upstream_key: String::new(),
-            upstreams: Vec::new(),
-            api_key: String::new(),
-            jwt_secret: String::new(),
-            audit_path: String::new(),
-            rules_path: String::new(),
-        }
-    }
 }
 
 /// Server configuration.
@@ -578,7 +547,7 @@ fn default_max_credential_size() -> usize {
 // ============================================================================
 
 /// HSM (Hardware Security Module) configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct HsmConfig {
     /// Enable HSM.
     #[serde(default = "default_false")]
@@ -595,17 +564,6 @@ pub struct HsmConfig {
     /// HSM PIN (use env var in production).
     #[serde(default)]
     pub pin: String,
-}
-
-impl Default for HsmConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            library_path: String::new(),
-            slot_id: 0,
-            pin: String::new(),
-        }
-    }
 }
 
 // ============================================================================

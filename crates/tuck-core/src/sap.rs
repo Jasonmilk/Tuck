@@ -157,18 +157,16 @@ impl InMemoryReplayCache {
 impl ReplayCache for InMemoryReplayCache {
     fn check_and_update(&mut self, source_id: &str, seq: u16) -> Result<(), ReplayError> {
         match self.last_seen.get(source_id) {
-            Some(&last) => {
-                if seq <= last {
-                    return Err(ReplayError::ReplayDetected {
-                        source_id: source_id.to_string(),
-                        last_seen: last,
-                        received: seq,
-                    });
-                }
+            // 已见过的源：seq 必须严格递增（相等也算重放）。
+            Some(&last) if seq <= last => {
+                return Err(ReplayError::ReplayDetected {
+                    source_id: source_id.to_string(),
+                    last_seen: last,
+                    received: seq,
+                });
             }
-            None => {
-                // First time seeing this source — any seq is valid
-            }
+            // 其余两种情形（首次见到 / seq 前进）都要落库。
+            Some(_) | None => {}
         }
         self.last_seen.insert(source_id.to_string(), seq);
         Ok(())

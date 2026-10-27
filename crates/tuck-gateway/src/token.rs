@@ -160,7 +160,11 @@ mod tests {
         let mut parts: Vec<&str> = tok.split('.').collect();
         // Flip a char in the payload segment.
         let p = parts[1].to_string();
-        let flipped = if p.starts_with('e') { format!("f{}", &p[1..]) } else { format!("e{}", &p[1..]) };
+        let flipped = if let Some(rest) = p.strip_prefix('e') {
+            format!("f{}", rest)
+        } else {
+            format!("e{}", &p[1..])
+        };
         parts[1] = &flipped;
         let tampered = parts.join(".");
         assert!(matches!(verify(&tampered, SECRET, 1_700_000_100), Err(TokenError::BadSignature)));

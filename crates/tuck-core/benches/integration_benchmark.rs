@@ -281,7 +281,7 @@ fn bench_full_pipeline(c: &mut Criterion) {
             ];
             let mut request = OutboundRequest::new();
             let rt = tokio::runtime::Runtime::new().unwrap();
-            let result = rt.block_on(handler.handle_outbound(headers, &mut request, &target)).unwrap();
+            let _result = rt.block_on(handler.handle_outbound(headers, &mut request, &target)).unwrap();
 
             // Also write audit entry
             let mut log = AuditLog::new();

@@ -80,7 +80,7 @@ impl AuditEntry {
     ///                  identity_label)
     pub fn compute_hash(&self) -> Hash {
         let mut hasher = Sha256::new();
-        hasher.update(&self.prev_hash);
+        hasher.update(self.prev_hash);
         hasher.update(self.entry_id.as_bytes());
         hasher.update(self.timestamp.to_le_bytes());
         hasher.update(self.decision.as_bytes());

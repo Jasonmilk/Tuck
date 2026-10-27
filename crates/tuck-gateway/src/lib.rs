@@ -97,7 +97,6 @@ pub use redact::{MappingTable, Replacement};
 /// Full governance pipeline wiring (features `policy` + `redact`).
 #[cfg(all(feature = "policy", feature = "redact"))]
 pub mod gov;
-#[cfg(all(feature = "policy", feature = "redact"))]
 
 /// Session tokens (JWT HS256) — CAPABILITY-13 mode-scope carrier.
 #[cfg(all(feature = "policy", feature = "redact"))]
