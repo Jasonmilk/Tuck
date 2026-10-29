@@ -123,6 +123,15 @@ pub struct Replacement {
     /// Position in the redacted text.
     pub start: usize,
     pub end: usize,
+    /// 命中的规则类别（ADR-0007 §5 #3 已批，2026-10-28）。
+    ///
+    /// 为什么需要它：`matrix.rs` 用**全部命中的最高优先类**决定 transform，
+    /// 但传给 `redact()` 的是全部类别的 hits ⇒ 只记 `placeholder` 的话，
+    /// 事后无法回答「这个占位符是被哪一类规则打掉的」（`Guard` 与 `Mapping`
+    /// 的处置相反，混在一起就是两种事实一种记录）。
+    /// 只加类别，**不加原文 span**：`start/end` 是脱敏后文本坐标，
+    /// 改记原文坐标会让「两坐标之差 = 原实体长度」成为可读泄露（ADR-0007 D5）。
+    pub category: crate::policy::Category,
 }
 
 /// Session-scoped entity → placeholder table.
@@ -182,6 +191,7 @@ impl MappingTable {
                 placeholder: placeholder.clone(),
                 start,
                 end: start + placeholder.len(),
+                category: h.category,
             });
             cursor = h.end;
         }
@@ -253,6 +263,35 @@ mod tests {
     use super::*;
     use crate::matrix::{Action, Destination, PolicyMatrix, Transform, decide};
     use crate::policy::{Category, Kind, Rule, RuleSet};
+
+    /// ADR-0007 §5 #3（2026-10-28 已批）：`Replacement` 必须带上命中类别。
+    ///
+    /// 正样本：Guard 命中 ⇒ `category == Guard`。
+    /// 负样本：同一段文本若类别被写死成 Mapping（`Category` 的**首个变体**，
+    /// 也就是复制粘贴最容易撞上的值），本条必须红 —— 否则「加了字段」和
+    /// 「字段被正确填了」是不可区分的两件事。
+    #[test]
+    fn replacement_carries_the_hit_category_not_a_default() {
+        let mut table = MappingTable::new();
+        let text = "联系 13800138000";
+        let start = text.find("13800138000").unwrap();
+        let hits = vec![crate::policy::Hit {
+            rule_id: "phone".into(),
+            category: Category::Guard,
+            start,
+            end: start + "13800138000".len(),
+            matched: "13800138000".into(),
+        }];
+        let (redacted, replacements) = table.redact(text, &hits);
+        assert_eq!(replacements.len(), 1);
+        assert_eq!(replacements[0].category, Category::Guard);
+        assert_ne!(
+            replacements[0].category,
+            Category::Mapping,
+            "类别被填成了首个变体 ⇒ 字段存在但没生效"
+        );
+        assert!(redacted.contains(&replacements[0].placeholder[..]));
+    }
 
     fn mapping_rules() -> RuleSet {
         let rules = vec![Rule {

@@ -163,3 +163,22 @@ crates/tuck-gateway/src/audit_api.rs  audit_stats 里读对了
    ⇒ **已批 2026-10-29（园丁）**：`Replacement` 允许加 1 个字段（`pub category: Category`）。已核成本：`lib.rs:95` `pub use` 对外、构造点 **1 处**（`redact.rs:181`）、工作区内其它构造者 **0**。
    ⇒ 仍不批准的部分：**实体级记录入链**（append-only 不可撤，待 D5 全文批后再写行）。
 4. D6 的行为半段（`else` 分支出声）—— **授权②**，另行裁定。
+
+## 6. 2026-10-28 追加：已批一件、待批一件
+
+### 6.1 `Replacement` + `pub category: Category` —— 已批，已落
+`crates/tuck-gateway/src/redact.rs` 的 `Replacement` 增加 `widget category`，由 `Hit.category` 填充。
+测试：`replacement_carries_the_hit_category_not_a_default`（正样本 Guard ⇒ Guard；
+负样本：写死成 `Category` 首个变体 `Mapping` ⇒ 必红）。
+可逆性：结构体字段 + 一处构造点（`redact.rs:181`），工作区内其它构造者为 0。
+**仍未做**：`Replacement.start/end` 保持「脱敏后文本」坐标，不记原文 span（D5 的理由）。
+
+### 6.2 实体级 `kind: "redact"` 入链 —— 形状提案，**待批，未写行**
+- 形状：`{"kind":"redact","trace_id":…,"data":{"session":…,"destination":…,"entities":[{"placeholder":"P_00","category":"mapping"}]}}`
+- 语义：一次 redact 调用一条；只写令牌与类别，不写原文、不写原文坐标；
+  与调用层 `request`/`response` 并存（ADR-0004「每笔 2 条」⇒「2 + N 条，有才写」）。
+- 测试计划：正样本（命中 ⇒ 一条 redact 且 entities 长度 = replacements 长度）；
+  负样本（未命中/未启用 ⇒ **零条** 且带 `not_configured` 事件，不许写成「一条空 entities」——
+  「什么都没打」与「打了 0 个」是两件事）。
+- 不可回滚：链 append-only，一旦写入即永久。故**形状先批、代码后写**；
+  若形状将来要改，只能新增 kind，不能改已写入行的含义。
