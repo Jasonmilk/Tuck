@@ -75,7 +75,15 @@ pub(crate) async fn audit_query(
                 }
             }
             if let Some(a) = &action_filter {
-                if v.get("payload").and_then(|p| p.get("action")).and_then(serde_json::Value::as_str)
+                // `action` sits one level deeper: `record()` wraps the payload as
+                // `{kind, trace_id, data:{action, …}}` (`ledger.rs`). Reading
+                // `payload.action` matched nothing, so this filter always answered
+                // 0 — indistinguishable from "no such events happened"
+                // (ADR-0007 §3). `audit_stats` below already reads `data.action`.
+                if payload
+                    .and_then(|p| p.get("data"))
+                    .and_then(|d| d.get("action"))
+                    .and_then(serde_json::Value::as_str)
                     != Some(a.as_str())
                 {
                     continue;

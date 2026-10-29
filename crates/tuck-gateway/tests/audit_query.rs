@@ -123,12 +123,17 @@ async fn governed(router: &Router, token: &str) -> (StatusCode, Value) {
 }
 
 async fn audit_query(router: &Router, token: &str, trace: &str) -> (StatusCode, Value) {
+    audit_query_raw(router, token, &format!("trace_id={}", urlencode(trace))).await
+}
+
+/// Raw query variant — needed to exercise filters other than `trace_id`.
+async fn audit_query_raw(router: &Router, token: &str, query: &str) -> (StatusCode, Value) {
     let resp = router
         .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri(format!("/v1/audit?trace_id={}", urlencode(trace)))
+                .uri(format!("/v1/audit?{query}"))
                 .header("authorization", format!("Bearer {token}"))
                 .body(Body::empty())
                 .unwrap(),
@@ -174,6 +179,29 @@ async fn audit_query_requires_credential() {
     let (router, _client) = spawn().await;
     let (status, _) = audit_query(&router, "", "job#0").await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+/// ADR-0007 §3: the `action=` filter read `payload.action`, but the action
+/// lives at `payload.data.action`. It matched nothing, so the endpoint always
+/// answered 0 — which reads exactly like "no such events happened".
+/// One positive sample (the action that really occurred) + one negative
+/// sample (an action that did not) — a criterion that can only ever return 0
+/// proves nothing.
+#[tokio::test]
+async fn audit_query_action_filter_matches_the_action_that_occurred() {
+    let (router, _client) = spawn().await;
+    let token = partner_token();
+    let (status, _) = governed(&router, &token).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, hit) = audit_query_raw(&router, &token, "action=forward").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(hit["count"], 1, "the forwarded call must be findable by action");
+    assert_eq!(hit["entries"][0]["payload"]["data"]["action"], "forward");
+
+    let (status, miss) = audit_query_raw(&router, &token, "action=block").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(miss["count"], 0, "no block happened; the filter must say so");
 }
 
 #[tokio::test]
