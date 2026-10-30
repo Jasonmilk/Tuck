@@ -12,6 +12,8 @@ fail=0
 step(){ printf '  %-34s ' "$1"; }
 
 step "workspace tests (--all-features)"
+# ★ 当前本命令会红：9 条判据在证明缺陷本身，清单见
+#   crates/tuck-core/tests/EXPECTED-RED.md（只许缩短）。这不是回归。
 if cargo test --workspace --all-features 2>&1 | tail -40 | grep -qE '^test result: FAILED'; then
   echo "★ RED"; fail=1
 elif cargo test --workspace --all-features >/tmp/tuck_verify_tests.log 2>&1; then
