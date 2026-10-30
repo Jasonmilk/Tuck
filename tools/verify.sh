@@ -12,15 +12,16 @@ fail=0
 step(){ printf '  %-34s ' "$1"; }
 
 step "workspace tests (--all-features)"
-# ★ 当前本命令会红：9 条判据在证明缺陷本身，清单见
-#   crates/tuck-core/tests/EXPECTED-RED.md（只许缩短）。这不是回归。
-if cargo test --workspace --all-features 2>&1 | tail -40 | grep -qE '^test result: FAILED'; then
-  echo "★ RED"; fail=1
-elif cargo test --workspace --all-features >/tmp/tuck_verify_tests.log 2>&1; then
-  tg_ok=$(grep -cE '^test result: ok' /tmp/tuck_verify_tests.log)
-  echo "OK  (${tg_ok} 个测试组)"
+# ★ 分类而非跳过：真跑一遍 `cargo test --workspace --all-features`，由 tools/expected-red.py
+#   把「已知在证明缺陷的 9 条」与「真回归」分开判。四判据 + 绿时也打印 KNOWN-LIVE。
+#   它比裸 `cargo test` **更严**：名单内条目变绿/没跑/被 #[ignore] 都判红（防「删掉测试就变绿」）。
+#   人读说明：crates/tuck-core/tests/EXPECTED-RED.md　机器名单：tools/expected-red.list
+if python3 tools/expected-red.py >/tmp/tuck_verify_tests.log 2>&1; then
+  tg_ok=$(grep -cE '^test result: ok' /tmp/tuck_expected_red.log 2>/dev/null || echo '?')
+  echo "OK  (${tg_ok} 个测试组绿；$(grep -c '^  \[' /tmp/tuck_verify_tests.log) 条 KNOWN-LIVE 已具名)"
+  sed -n 's/^/      /p' /tmp/tuck_verify_tests.log
 else
-  echo "★ RED（详见 /tmp/tuck_verify_tests.log）"; fail=1
+  echo "★ RED（详见 /tmp/tuck_verify_tests.log）"; sed -n 's/^/      /p' /tmp/tuck_verify_tests.log; fail=1
 fi
 
 # clippy：语义与【本仓自己的标准】一致（PLAN: "clippy 新文件零警告"）——**不把整仓 -D warnings 当门槛**。

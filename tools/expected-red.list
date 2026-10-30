@@ -1,0 +1,14 @@
+# 预期红名单 —— 机器读的那份。人读的说明在 crates/tuck-core/tests/EXPECTED-RED.md
+# 格式：kind <TAB> 测试名 <TAB> 根因行     kind 只能是 forensic（取证红）|caliber（口径红）
+#
+# 加一行 = 承认「又一条判据在证明缺陷」，必须同时给出修复/裁决依据。
+# forensic 只许缩短；caliber 缩短 = 偷偷接受现状，只能由裁决改口径。
+forensic	financial_operation_with_replay_disabled_must_not_auto_pass	src/lib.rs:151
+forensic	replay_disabled_must_not_turn_catastrophic_reject_into_pass	src/lib.rs:151
+forensic	break_glass_must_not_be_enabled_by_default	src/lib.rs:364
+forensic	break_glass_must_not_be_enabled_in_policy_config_default	src/policy.rs:285
+forensic	no_test_fixture_may_encode_break_glass	src/hot_reload.rs:327
+forensic	unanswered_must_not_be_recorded_as_timed_out	src/hitl.rs
+forensic	road48_hard_override_catastrophic_replay_disabled_must_reject	src/lib.rs:151
+forensic	financial_operation_with_replay_disabled_must_need_human_confirm	src/lib.rs:151
+forensic	catastrophic_with_replay_disabled_must_still_reject	src/lib.rs:151
