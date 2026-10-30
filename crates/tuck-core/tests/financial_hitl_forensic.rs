@@ -1,24 +1,27 @@
-//! 取证判据（**Forensic**）—— 证明「缺陷当前正在生效」
+//! Forensic criteria: prove that the defect is live *right now*.
 //!
-//! ## 与验收判据的分工（阶段 A' · 第 3 项：拆文件）
+//! ## Division of labour with the acceptance criteria (stage A', item 3: split the files)
 //!
-//! | | 断言形态 | 证明什么 | 修复后 |
+//! | | assertion shape | proves | after the fix |
 //! |---|---|---|---|
-//! | **本文件（取证）** | `assert_ne!(当前值, 不可接受值)` | 缺陷**在** | 转绿 |
-//! | `financial_hitl_acceptance.rs` | `assert_eq!(当前值, 目标值)` | 目标**未达成** | 转绿 |
+//! | **this file (forensic)** | `assert_ne!(current, unacceptable)` | the defect **is here** | turns green |
+//! | `financial_hitl_acceptance.rs` | `assert_eq!(current, target)` | the target **is not reached** | turns green |
 //!
-//! 拆开的理由：混在一处会让阶段 B 的归因混乱——「这条红是因为缺陷还在，
-//! 还是因为目标没达到」需要看断言形态才能分。
+//! Why split: mixed together, a red in stage B cannot be attributed -- "is this red
+//! because the defect is still there, or because the target is not reached yet"
+//! can only be answered by looking at the assertion shape.
 //!
-//! ## 纪律（阶段 A' · 第 1 项的教训）
+//! ## Discipline (the lesson of stage A', item 1)
 //!
-//! **本文件不含任何「断言当前行为」的测试。**
-//! 只断言「不可以是 X」，从不断言「现在是 X 且将是 X」——后者是反向路标。
-//! 需要记录当前行为的，写进 `CI144-REGISTER.md`，不写成断言。
+//! **This file contains no test that asserts the current behaviour.**
+//! It only asserts "it must not be X"; it never asserts "it is X and will stay X" --
+//! the latter is a signpost pointing the wrong way. Anything that needs to record
+//! current behaviour goes into `CI144-REGISTER.md`, not into an assertion.
 //!
-//! ## Mutation 措辞纪律（阶段 A' · 第 7 项）
+//! ## Mutation wording discipline (stage A', item 7)
 //!
-//! 每条 `/// Mutation:` 写**「把哪行改成什么样」**，不写「改成什么方向」。
+//! Every `/// Mutation:` line states **which line becomes what**, not
+//! "what direction to move in".
 
 use std::time::Duration;
 
@@ -28,9 +31,9 @@ use tuck_core::{
     decide, Decision, OverrideFlag, PfpHeader, ReplayEnable, RiskLevel, SecurityPolicy,
 };
 
-/// 复刻 `lib.rs:468` 的 `make_pfp`（测试夹具，不改动被检件）。
-/// 位域照 PFP README Byte Layout：Byte2 Bits2-3 = Risk-Level；Byte3 Bit1 = Override-Flag，
-/// Bit2 = Replay-Enable。
+/// Mirrors `make_pfp` from `lib.rs:468` (a test fixture; the subject under test is
+/// not modified). Bit layout follows the PFP README Byte Layout: byte 2 bits 2-3 =
+/// Risk-Level; byte 3 bit 1 = Override-Flag, bit 2 = Replay-Enable.
 fn pfp(risk: RiskLevel, of: OverrideFlag, re: ReplayEnable) -> PfpHeader {
     let mut bytes = [0xCF, 0x14, 0, 0];
     bytes[2] = (risk as u8) << 2;
@@ -38,20 +41,20 @@ fn pfp(risk: RiskLevel, of: OverrideFlag, re: ReplayEnable) -> PfpHeader {
     PfpHeader::from_bytes(bytes).unwrap()
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 缺口 3 · 降级 ⇒ 金融操作绕过 HITL
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
+// Gap 3 - downgrade => a financial operation walks around HITL
+// ===========================================================================
 
-/// ★★ **主判据 · 取证红**
+/// **Main criterion - forensic red**
 ///
-/// 金融操作 = `CRITICAL(2)` + `Replay-Enable=0` ⇒ 当前得到 `Pass`。
+/// A financial operation = `CRITICAL(2)` + `Replay-Enable=0` => today it yields `Pass`.
 ///
-/// 为什么 `Pass` 不可接受：`Decision::NeedHumanConfirm` 语义是
-/// 「暂停，请求人类确认；确认→Pass，超时→Reject」。直接返回 `Pass`
-/// ⇒ **HITL 这道门根本没有被走过**。
+/// Why `Pass` is unacceptable: `Decision::NeedHumanConfirm` means "pause and ask a
+/// human; on confirmation -> Pass, on timeout -> Reject". Returning `Pass` directly
+/// means **the HITL door was never walked through**.
 ///
-/// Mutation: 把 `lib.rs:151` 的 `ReplayEnable::Disabled => RiskLevel::Medium`
-///           改成返回 `self.risk_level()`，本条转绿。
+/// Mutation: change `ReplayEnable::Disabled => RiskLevel::Medium` in `lib.rs:151` to
+///           return `self.risk_level()`; this test turns green.
 #[test]
 fn financial_operation_with_replay_disabled_must_not_auto_pass() {
     let p = pfp(RiskLevel::Critical, OverrideFlag::Normal, ReplayEnable::Disabled);
@@ -60,86 +63,95 @@ fn financial_operation_with_replay_disabled_must_not_auto_pass() {
     assert_ne!(
         d,
         Decision::Pass,
-        "CRITICAL(金融/不可逆) + Replay-Enable=0 ⇒ 当前是 {d:?}。\
-         降级把需人确认的动作变成了直接放行 —— HITL 未被走过。"
+        "CRITICAL (financial / irreversible) + Replay-Enable=0 => currently {d:?}. \
+         The downgrade turned an action that needs human confirmation into an outright \
+         pass -- HITL was never walked through."
     );
 }
 
-/// ★ **取证红**：`CATASTROPHIC` 在 replay-disabled 下被**从 Reject 降到 Pass**。
+/// **Forensic red**: under replay-disabled, `CATASTROPHIC` is **lowered from Reject
+/// to Pass**.
 ///
-/// **关掉重放保护，让最危险的类别变得更宽松。**
+/// **Turning the replay protection off makes the most dangerous class more permissive.**
 ///
-/// Mutation: 把 `lib.rs:151` 的 `ReplayEnable::Disabled => RiskLevel::Medium`
-///           改成返回 `self.risk_level()`，本条转绿。
+/// Mutation: change `ReplayEnable::Disabled => RiskLevel::Medium` in `lib.rs:151` to
+///           return `self.risk_level()`; this test turns green.
 #[test]
 fn replay_disabled_must_not_turn_catastrophic_reject_into_pass() {
     let off = pfp(RiskLevel::Catastrophic, OverrideFlag::Normal, ReplayEnable::Disabled);
     assert_ne!(
         decide(&off, &SecurityPolicy::default()),
         Decision::Pass,
-        "关掉重放保护后 CATASTROPHIC 从 Reject 变成了 Pass —— 补偿措施让最危险的类别更宽松，\
-         与 PFP Rule 6 第 4 条『prevents high-risk physical attacks via replay』方向相反"
+        "with replay protection off, CATASTROPHIC went from Reject to Pass -- the \
+         compensating measure makes the most dangerous class more permissive, the \
+         opposite of PFP Rule 6 item 4, 'prevents high-risk physical attacks via replay'"
     );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 缺口 4 · break-glass 在默认路径上开着
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
+// Gap 4 - break-glass is on in the default path
+// ===========================================================================
 
-/// ★ **取证红**：`SecurityPolicy::default()` 的 `catastrophic_override` 是 `HardOverridePass`。
+/// **Forensic red**: `catastrophic_override` in `SecurityPolicy::default()` is
+/// `HardOverridePass`.
 ///
-/// 默认路径 ⇒ 不配置就等于启用。三次裁决已拒绝它
-/// （ADR-0054 §五.2 / ROAD-18 B-4 / ADR-0004 D7）。
+/// The default path means: not configuring it equals enabling it. Three rulings have
+/// already rejected it (ADR-0054 section 5.2 / ROAD-18 B-4 / ADR-0004 D7).
 ///
-/// Mutation: 把 `lib.rs:364` 的 `catastrophic_override: Decision::HardOverridePass`
-///           改成 `Decision::Reject`，本条转绿。
+/// Mutation: change `catastrophic_override: Decision::HardOverridePass` in `lib.rs:364`
+///           to `Decision::Reject`; this test turns green.
 #[test]
 fn break_glass_must_not_be_enabled_by_default() {
     let pol = SecurityPolicy::default();
     assert_ne!(
         pol.catastrophic_override,
         Decision::HardOverridePass,
-        "默认策略把 break-glass 开成了 HardOverridePass —— 不配置即启用，\
-         且已被 ADR-0054 §五.2 / ROAD-18 B-4 / ADR-0004 D7 三次拒绝"
+        "the default policy opens break-glass as HardOverridePass -- it is on unless \
+         configured off, and has been rejected three times (ADR-0054 5.2 / ROAD-18 B-4 \
+         / ADR-0004 D7)"
     );
 }
 
-/// ★ **取证红（阶段 A' 第 4 项 · 新增）**：**第二处生产默认**。
+/// **Forensic red (stage A', item 4 - new)**: **the second production default**.
 ///
-/// 阶段 A 报告只判了 `lib.rs:364` 的 `SecurityPolicy::default()`，
-/// **漏了 `policy.rs:285` 的 `PolicyConfig::default()`** —— 那是 TOML 配置路径的默认值，
-/// 与 `SecurityPolicy::default()` 是**两条独立的默认源**。
+/// The stage A report only judged `SecurityPolicy::default()` in `lib.rs:364` and
+/// **missed `PolicyConfig::default()` in `policy.rs:285`** -- the default used by the
+/// TOML configuration path, which is a **second, independent default source**.
 ///
-/// ⇒ 只改 `lib.rs:364` 而漏掉这里 ⇒ 走配置路径的部署仍然开着 break-glass。
+/// => Fixing only `lib.rs:364` leaves deployments that go through the configuration
+/// path with break-glass still on.
 ///
-/// Mutation: 把 `policy.rs:285` 的 `catastrophic_override: DecisionConfig::HardOverridePass`
-///           改成 `DecisionConfig::Reject`，本条转绿。
+/// Mutation: change `catastrophic_override: DecisionConfig::HardOverridePass` in
+///           `policy.rs:285` to `DecisionConfig::Reject`; this test turns green.
 #[test]
 fn break_glass_must_not_be_enabled_in_policy_config_default() {
     let pol = PolicyConfig::default().to_policy();
     assert_ne!(
         pol.catastrophic_override,
         Decision::HardOverridePass,
-        "PolicyConfig::default()（policy.rs:285）是【第二处】生产默认，\
-         同样开着 break-glass。TOML 配置路径与 SecurityPolicy::default() 是两条独立默认源，\
-         只改一处等于没改"
+        "PolicyConfig::default() (policy.rs:285) is the SECOND production default and \
+         it also opens break-glass. The TOML configuration path and \
+         SecurityPolicy::default() are two independent default sources, so fixing one \
+         of them is the same as fixing neither"
     );
 }
 
-/// ★ **取证红（阶段 A' 第 4 项 · 新增）**：**测试夹具里写死 break-glass**。
+/// **Forensic red (stage A', item 4 - new)**: **a test fixture hard-codes break-glass**.
 ///
-/// `hot_reload.rs:327`（`default_policy_toml`）与 `:343`（`strict_policy_toml`）
-/// 两处把 `catastrophic_override = "hard_override_pass"` 写进了夹具。
+/// `hot_reload.rs:327` (`default_policy_toml`) and `:343` (`strict_policy_toml`) both
+/// write `catastrophic_override = "hard_override_pass"` into fixtures.
 ///
-/// **定性（修正阶段 A 报告的说法）**：这两处在 `#[cfg(test)] mod tests` 内
-/// （`hot_reload.rs:302`），**不是生产默认**，是夹具。
-/// ⇒ 阶段 A 报告把它们算作「默认开着的地方」是**我数错了**（见 `CI144-REGISTER.md` 的更正）。
+/// **Classification (correcting the stage A report)**: both live inside
+/// `#[cfg(test)] mod tests` (starting at `hot_reload.rs:302`) -- they are **not**
+/// production defaults, they are fixtures. => Counting them as "places where the
+/// default is on" was **my miscount** (see the correction in `CI144-REGISTER.md`).
 ///
-/// 但它们仍须被判：改生产默认值时若不同步改这两处，
-/// ⇒ 热加载测试会继续断言一个**已被禁止的值**，成为残留路标。
+/// They still have to be judged: if the production default is changed without changing
+/// them, the hot-reload tests keep asserting a **value that has been forbidden**, and
+/// become a leftover signpost.
 ///
-/// Mutation: 把 `hot_reload.rs` 里两处 `hard_override_pass` 字面量删掉或改成别的决策，
-///           本条转绿。
+/// Mutation: delete or change the two `hard_override_pass` literals in `hot_reload.rs`;
+///           this test turns green.
 #[test]
 fn no_test_fixture_may_encode_break_glass() {
     let src = include_str!("../src/hot_reload.rs");
@@ -152,36 +164,40 @@ fn no_test_fixture_may_encode_break_glass() {
 
     assert!(
         hits.is_empty(),
-        "hot_reload.rs 的夹具里仍有 break-glass 字面量（改动生产默认值时必须同步改这里）：\n{}",
+        "hot_reload.rs fixtures still contain a break-glass literal (they must be \
+         changed together with the production default):\n{}",
         hits.iter()
-            .map(|(n, l)| format!("  行 {n}: {}", l.trim()))
+            .map(|(n, l)| format!("  line {n}: {}", l.trim()))
             .collect::<Vec<_>>()
             .join("\n")
     );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 缺口 · 无人应答被表达成超时
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
+// Gap - an unanswered request is expressed as a timeout
+// ===========================================================================
 
-/// ★★ **取证红 · 无人应答不得被表达成超时**
+/// **Forensic red - an unanswered request must not be expressed as a timeout**
 ///
-/// 构造 gate，`request()` 后**既不 confirm 也不 reject**（= 无人应答），
-/// 超时后 `history()` 记的是 `TimedOut`。
+/// Build a gate, call `request()`, then **neither confirm nor reject** (= nobody
+/// answered). After the timeout, `history()` records `TimedOut`.
 ///
-/// 为什么这是缺陷：`ConfirmStatus::TimedOut` 语义是「有人，但没在时限内答复」；
-/// 本场景是「**根本没有应答者**」。
-/// ⇒ 两个事实折叠成一个值 ⇒ 与 anaphase 的 `ApprovalOutcome` 四值闭集
-/// （`AllowedOnce/Rejected/Cancelled/Unavailable`）不同形。
+/// Why that is a defect: `ConfirmStatus::TimedOut` means "there is someone, but they
+/// did not answer in time"; this scenario is "**there is no responder at all**".
+/// => Two facts are folded into one value => it no longer has the shape of anaphase's
+/// closed four-value `ApprovalOutcome` (`AllowedOnce/Rejected/Cancelled/Unavailable`).
 ///
-/// ⚠️ **本条的具名局限**（阶段 B 前置，见 `CI144-REGISTER.md` §应答者注册）：
-/// 单纯加枚举变体**修不好这条** —— `request()` 返回的 rx 被丢弃与否，
-/// gate 无从区分「有人拿着 rx 没回」与「根本没人拿 rx」。
-/// ⇒ 阶段 B 之前**必须先有应答者注册的设计**，否则 Pi 会做成恒绿假实现
-/// （「有 rx 就算有人」）。
+/// WARNING **named limit of this test** (a prerequisite for stage B, see the
+/// responder-registration section of `CI144-REGISTER.md`): adding an enum variant
+/// **does not fix this** -- whether the `rx` returned by `request()` is dropped is
+/// something the gate cannot observe, so it cannot tell "someone holds the rx and did
+/// not answer" from "nobody holds the rx".
+/// => Stage B needs a **responder-registration design first**, otherwise this becomes a
+/// permanently green fake implementation ("someone holds the rx, so someone is there").
 ///
-/// Mutation: 给 `ConfirmStatus` 加 `Unavailable` 变体，并让 `request()` 在
-///           **无应答者注册**时落该态而非 `TimedOut`，本条转绿。
+/// Mutation: add an `Unavailable` variant to `ConfirmStatus` and make `request()` record
+///           it (instead of `TimedOut`) when **no responder is registered**; this test
+///           turns green.
 #[tokio::test]
 async fn unanswered_must_not_be_recorded_as_timed_out() {
     let gate = HumanConfirmGate::new(Duration::from_millis(100));
@@ -189,35 +205,38 @@ async fn unanswered_must_not_be_recorded_as_timed_out() {
         .request("Critical", "Executive", "wire 100k to beneficiary")
         .await;
 
-    // 无人应答：不 confirm、不 reject。等超时任务跑完。
+    // Nobody answers: no confirm, no reject. Let the timeout task run out.
     tokio::time::sleep(Duration::from_millis(250)).await;
 
     let history = gate.history().await;
-    assert_eq!(history.len(), 1, "应当只有一条：那个无人应答的请求");
+    assert_eq!(history.len(), 1, "there must be exactly one entry: the unanswered request");
     assert_ne!(
         history[0].status,
         ConfirmStatus::TimedOut,
-        "'无人应答' 与 '有人没及时答' 是两个事实，当前都被记成 TimedOut。\
-         Tuck 生产上 confirm() 不可达 ⇒ 无人应答是常态，却被表达成超时（= 假装有人在听）"
+        "'nobody answered' and 'someone did not answer in time' are two facts; both are \
+         recorded as TimedOut today. In production Tuck, confirm() is unreachable, so \
+         nobody answering is the normal case, yet it is expressed as a timeout -- that \
+         is pretending somebody is listening"
     );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 反样本（**必须保持绿**）—— 防修法过头 / 防误伤
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
+// Counter-samples (**must stay green**) - guard against over-fixing / collateral damage
+// ===========================================================================
 
-/// 反样本①：`CRITICAL` + `RE=1` ⇒ `NeedHumanConfirm`（修前修后都须成立）。
+/// Counter-sample 1: `CRITICAL` + `RE=1` => `NeedHumanConfirm` (must hold before and
+/// after the fix).
 #[test]
 fn critical_with_replay_enabled_still_needs_human_confirm() {
     let p = pfp(RiskLevel::Critical, OverrideFlag::Normal, ReplayEnable::Enabled);
     assert_eq!(
         decide(&p, &SecurityPolicy::default()),
         Decision::NeedHumanConfirm,
-        "CRITICAL + RE=1 ⇒ NeedHumanConfirm（基线，修前修后都须成立）"
+        "CRITICAL + RE=1 => NeedHumanConfirm (baseline; must hold before and after the fix)"
     );
 }
 
-/// 反样本②：低风险不被误伤。
+/// Counter-sample 2: low risk is not caught in the blast radius.
 #[test]
 fn low_and_medium_risk_stay_pass() {
     let low = pfp(RiskLevel::Low, OverrideFlag::Normal, ReplayEnable::Enabled);
@@ -227,22 +246,23 @@ fn low_and_medium_risk_stay_pass() {
     assert_eq!(decide(&med, &SecurityPolicy::default()), Decision::Pass);
 }
 
-/// 反样本③：**原生** MEDIUM（非降级所得）保持 Pass。
-/// 与判据 1 的差别仅在「降没降级」⇒ 确保修法针对**降级这个动作**，
-/// 而不是一刀切把 `medium` 改掉。
+/// Counter-sample 3: a **genuine** MEDIUM (not produced by a downgrade) stays `Pass`.
+/// The only difference from criterion 1 is whether a downgrade happened => this makes
+/// sure the fix targets **the act of downgrading**, not `medium` as a value.
 #[test]
 fn genuine_medium_is_unaffected_by_the_downgrade_fix() {
     let m = pfp(RiskLevel::Medium, OverrideFlag::Normal, ReplayEnable::Disabled);
     assert_eq!(
         decide(&m, &SecurityPolicy::default()),
         Decision::Pass,
-        "原生 MEDIUM + RE=0 仍是 MEDIUM ⇒ Pass。修法只针对【降级】本身"
+        "genuine MEDIUM + RE=0 is still MEDIUM => Pass. The fix targets the DOWNGRADE itself"
     );
 }
 
-/// 反样本④：**CATASTROPHIC + HO + RE=1** 落到 `policy.catastrophic_override`。
-/// 本条**不断言**那个值是否正确（那是缺口 4 的裁决范围），
-/// 只钉住「RE=1 时 HO 路径确实被走到」——作为验收判据的对照基线。
+/// Counter-sample 4: **CATASTROPHIC + HO + RE=1** lands on `policy.catastrophic_override`.
+/// This test **does not** assert whether that value is right (that is the scope of
+/// gap 4's ruling); it only pins "with RE=1 the HO path really is reached", as a
+/// comparison baseline for the acceptance criteria.
 #[test]
 fn hard_override_path_is_reachable_when_replay_enabled() {
     let p = pfp(RiskLevel::Catastrophic, OverrideFlag::HardOverride, ReplayEnable::Enabled);
@@ -250,29 +270,32 @@ fn hard_override_path_is_reachable_when_replay_enabled() {
     assert_eq!(
         d,
         SecurityPolicy::default().catastrophic_override,
-        "RE=1 时 HO+CATASTROPHIC 应落到 policy.catastrophic_override（对照基线）"
+        "with RE=1, HO + CATASTROPHIC must land on policy.catastrophic_override (baseline)"
     );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 守卫 · 唯一事实来源（SSOT）—— 本条当前【绿】，守的是未来
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
+// Guard - single source of truth (SSOT): currently GREEN, it guards the future
+// ===========================================================================
 
-/// 守卫（当前绿）：**两份默认值必须逐字段相等**。
+/// Guard (currently green): **the two defaults must be field-by-field equal**.
 ///
-/// 存在两份 `impl Default`：
-///   - `lib.rs:364`  `impl Default for SecurityPolicy`   （运行时层 · 生产可达，main.rs:59）
-///   - `policy.rs:285` `impl Default for PolicyConfig`   （配置层 · TOML 形状）
+/// Two `impl Default` exist:
+///   - `lib.rs:364`    `impl Default for SecurityPolicy`  (runtime layer, production
+///                     reachable, main.rs:59)
+///   - `policy.rs:285` `impl Default for PolicyConfig`    (config layer, TOML shape)
 ///
-/// 两份都写死了同一组 6 个字段 ⇒ **SSOT 分裂**：改一处漏一处，两处默认值就会漂。
-/// 修法（**勿增实体**）：让运行时层成为配置层的**投影**
-/// （`SecurityPolicy::default() = PolicyConfig::default().to_policy()`），
-/// 与 anaphase `ACTION_WORDS` + `role_words()` 同形。
+/// Both hard-code the same set of six fields => **SSOT split**: change one and miss
+/// the other and the two defaults drift.
+/// Fix (**add no new entity**): make the runtime layer a **projection** of the config
+/// layer (`SecurityPolicy::default() = PolicyConfig::default().to_policy()`), the same
+/// shape as anaphase's `ACTION_WORDS` + `role_words()`.
 ///
-/// 本条现在是绿的（两份恰好相等）⇒ 它是**漂移检测器**，不是缺陷判据：
-/// 一旦有人只改了一处，它立刻红。
+/// This test is green today (the two happen to be equal) => it is a **drift detector**,
+/// not a defect criterion: as soon as someone changes only one side it goes red.
 ///
-/// Mutation: 改 `lib.rs:364` 或 `policy.rs:285` 其中**一处**而不改另一处 ⇒ 本条转红。
+/// Mutation: change **one** of `lib.rs:364` or `policy.rs:285` without changing the
+///           other => this test turns red.
 #[test]
 fn the_two_defaults_must_not_drift_apart() {
     let a = SecurityPolicy::default();
@@ -289,13 +312,13 @@ fn the_two_defaults_must_not_drift_apart() {
         assert_eq!(
             format!("{x:?}"),
             format!("{y:?}"),
-            "默认值在 {name} 上分裂了：SecurityPolicy::default() 与 \
-             PolicyConfig::default().to_policy() 不一致 —— 改一处必须改另一处，\
-             或让其中一份成为另一份的投影"
+            "the defaults drifted apart on {name}: SecurityPolicy::default() and \
+             PolicyConfig::default().to_policy() disagree -- changing one means changing \
+             the other, or making one a projection of the other"
         );
     }
     assert_eq!(
         a.external_additional_check, b.external_additional_check,
-        "external_additional_check 同样分裂了"
+        "external_additional_check drifted apart as well"
     );
 }
