@@ -90,15 +90,39 @@ def parse(log):
 
 
 def touched_files():
-    """本次改动的文件：工作区 vs HEAD，加上 HEAD 这一个提交。"""
+    """Files touched by this change: worktree vs HEAD, plus the HEAD commit itself.
+
+    Cross-repo root causes: a list entry may name `Repo:path` (e.g.
+    `anaphase-helix:src/security.rs`). Fixing A2 legitimately touches the other repo, and
+    without this the criterion would call a correct fix 'editing the test instead of the
+    code' -- punishing the fix. So each repo is asked separately, and the answer is the
+    union of relative paths *and* repo-qualified paths, so both spellings match.
+    """
     out = set()
-    for rng in (["diff", "--name-only", "HEAD"], ["diff", "--name-only", "HEAD~1", "HEAD"]):
-        try:
-            r = subprocess.run(["git", "-C", ROOT] + rng, capture_output=True, text=True)
-        except OSError:
-            continue
-        if r.returncode == 0:
-            out |= {l.strip() for l in r.stdout.splitlines() if l.strip()}
+    repos = {None: ROOT}
+    parent = os.path.dirname(ROOT)
+    try:
+        for name in os.listdir(parent):
+            cand = os.path.join(parent, name)
+            if os.path.isdir(os.path.join(cand, ".git")):
+                repos[name] = cand
+    except OSError:
+        pass
+    for name, root in repos.items():
+        for rng in (["diff", "--name-only", "HEAD"], ["diff", "--name-only", "HEAD~1", "HEAD"]):
+            try:
+                r = subprocess.run(["git", "-C", root] + rng, capture_output=True, text=True)
+            except OSError:
+                continue
+            if r.returncode != 0:
+                continue
+            for line in r.stdout.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                out.add(line)
+                if name:
+                    out.add("%s:%s" % (name, line))
     return out
 
 
@@ -125,7 +149,9 @@ def judge(log, items, touched):
             problems.append(f"IGNORED（{kind}）：{name} 被 #[ignore] 掉了 —— 那是关掉判据，不是修好缺陷")
         elif "FAILED" not in st:
             msg = f"变绿但未从名单移除（{kind}）：{name}"
-            rc_file = root_cause.split(":")[0]
+            # `Repo:path:line` or `path:line`
+            parts = root_cause.split(":")
+            rc_file = ":".join(parts[:-1]) if len(parts) > 2 else parts[0]
             if rc_file not in touched:
                 msg += (
                     f"；且本次改动没碰根因文件 {rc_file} ⇒ 疑似【改测试而不是改代码】。"
