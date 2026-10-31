@@ -1,3 +1,6 @@
+# since: 2026-10-30
+# stale-after: 2026-11-14
+#   ↑ 日历期限在本题合法：到期动作是【判红】，不是"改个日期"（DEBTS revisit-on 纪律）。
 # 预期红名单 —— 机器读的那份。人读的说明在 crates/tuck-core/tests/EXPECTED-RED.md
 # 格式：kind <TAB> 测试名 <TAB> 根因行     kind 只能是 forensic（取证红）|caliber（口径红）
 #

@@ -44,6 +44,23 @@ LIST = os.path.join(ROOT, "tools", "expected-red.list")
 TEST_LINE = re.compile(r"^test ([\w:]+) \.\.\. (ok|FAILED|ignored)")
 
 
+def load_meta(path):
+    """since:/stale-after: read from the list header.
+    A number that never changes stops being read: red value = variability
+    (GLOSSARY 3.17). So the green line must carry its own expiry."""
+    meta = {}
+    if not os.path.exists(path):
+        return meta
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            if line.startswith("#") and ":" in line:
+                k, _, v = line[1:].partition(":")
+                k = k.strip()
+                if k in ("since", "stale-after"):
+                    meta[k] = v.strip()
+    return meta
+
+
 def load_list(path):
     items = []
     if not os.path.exists(path):
@@ -124,12 +141,18 @@ def judge(log, items, touched):
     return problems, states
 
 
-def report(items, states, problems):
+def report(items, states, problems, meta=None):
+    meta = meta or {}
     live = [i for i in items if states.get(i[1]) and "FAILED" in states[i[1]]]
     kinds = {}
     for kind, _, _ in live:
         kinds[kind] = kinds.get(kind, 0) + 1
-    print(f"KNOWN-LIVE: {len(live)}" + (f"  ({', '.join(f'{k}={v}' for k, v in sorted(kinds.items()))})" if live else ""))
+    stamp = ""
+    if meta.get("since") or meta.get("stale-after"):
+        stamp = "  (since %s, stale after %s)" % (meta.get("since", "?"), meta.get("stale-after", "?"))
+    print(f"KNOWN-LIVE: {len(live)}"
+          + (f"  ({', '.join(f'{k}={v}' for k, v in sorted(kinds.items()))})" if live else "")
+          + stamp)
     for kind, name, root_cause in live:
         print(f"  [{kind}] {name}  <- {root_cause}")
     for p in problems:
@@ -201,7 +224,29 @@ def main():
             fh.write(log)
 
     problems, states = judge(log, items, touched_files())
-    return report(items, states, problems)
+    meta = load_meta(LIST)
+    # Calendar expiry is legal here only because the expiry action is RED, not
+    # "bump the date" (DEBTS revisit-on rule).
+    stale = meta.get("stale-after")
+    if live_and_stale(stale, states, items):
+        problems = problems + [
+            "stale-after %s 已过：这 %d 条已经红了很久而没人处理 —— 红的价值是可变性，"
+            "一个长期不变的 KNOWN-LIVE 等于没人看。修，或在裁决里改口径"
+            % (stale, sum(1 for k, n, _ in items if states.get(n) and "FAILED" in states[n]))
+        ]
+    return report(items, states, problems, meta)
+
+
+def live_and_stale(stale, states, items):
+    if not stale:
+        return False
+    import datetime
+    try:
+        due = datetime.date.fromisoformat(stale)
+    except ValueError:
+        return True
+    live = [n for _, n, _ in items if states.get(n) and "FAILED" in states[n]]
+    return bool(live) and datetime.date.today() > due
 
 
 if __name__ == "__main__":
