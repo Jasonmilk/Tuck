@@ -117,6 +117,17 @@ impl From<ConfirmResult> for Decision {
 // HITL Gate
 // ============================================================================
 
+/// DEPRECATED FOR PRODUCTION (B1, 2026-11-01).
+///
+/// Tuck decides **whether** to ask a human; anaphase executes **how** to ask, and anaphase
+/// already carries the closed set (`ApprovalOutcome`: AllowedOnce / Rejected / Cancelled /
+/// Unavailable). This gate has **zero production callers** and is kept only as the shape
+/// record for that migration -- mounting it on a live router would create a second
+/// semantics for one fact.
+///
+/// The migration must carry the **narrow** semantics: anaphase's `Unavailable` was
+/// narrowed to "no responder" (B2b-1); a responder that exists but cannot be reached is a
+/// different fact and does not belong in this closed set.
 /// HITL (Human-In-The-Loop) execution gate.
 ///
 /// Manages pending confirmation requests. Supports:
