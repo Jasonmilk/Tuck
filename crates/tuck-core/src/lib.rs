@@ -139,17 +139,28 @@ impl PfpHeader {
         ReplayEnable::from((self.raw[3] >> 2) & 0b1)
     }
 
-    /// Effective risk level, applying Rule 6 downgrade.
+    /// Effective risk level (A1, 2026-11-01): **no downgrade**.
     ///
-    /// When Replay-Enable == 0, the effective risk level is forced to MEDIUM,
-    /// regardless of the original Risk-Level. This prevents high-risk physical
-    /// attacks via replay when replay protection is disabled.
+    /// The old shape forced MEDIUM when Replay-Enable == 0, which used the *freshness* axis
+    /// to rewrite the *consequence* axis. The result was backwards: turning replay
+    /// protection OFF made the most dangerous class MORE permissive (CATASTROPHIC Reject
+    /// became Pass, and an override silently lost its parallel alert). What a frame can do
+    /// does not change because we cannot tell whether it is a replay.
     #[inline]
     pub fn effective_risk_level(&self) -> RiskLevel {
-        match self.replay_enable() {
-            ReplayEnable::Enabled => self.risk_level(),
-            ReplayEnable::Disabled => RiskLevel::Medium, // Rule 6: forced downgrade
-        }
+        self.risk_level()
+    }
+
+    /// Whether the override corridor is open (A1).
+    ///
+    /// Closed when replay protection is off: without freshness a replayed "unconditional
+    /// pass" is indistinguishable from a real emergency, and that replay is exactly what
+    /// Rule 6 exists to stop. Closing the corridor keeps the risk level intact; the two
+    /// axes are no longer traded against each other.
+    #[inline]
+    pub fn override_permitted(&self) -> bool {
+        self.override_flag() == OverrideFlag::HardOverride
+            && self.replay_enable() == ReplayEnable::Enabled
     }
 }
 
@@ -416,18 +427,20 @@ pub enum TuckError {
 /// regardless of the original Risk-Level. This prevents high-risk physical
 /// attacks via replay when replay protection is disabled.
 ///
-/// # CATASTROPHIC Hard Override (Non-Negotiable Rule)
+/// # CATASTROPHIC Hard Override
 ///
-/// When effective Risk-Level == CATASTROPHIC AND Override-Flag == HARD_OVERRIDE,
-/// the decision is `HardOverridePass` — unconditional pass with highest priority.
-/// This is the non-negotiable part of the protocol.
+/// The corridor is `policy.catastrophic_override` and it is reachable only when
+/// `override_permitted()` holds, i.e. **replay protection is on** (A1, 2026-11-01). With
+/// replay off the frame may be a replay; this repository does not grant an unconditional
+/// pass to a frame it cannot authenticate, so the case falls through to the normal policy
+/// mapping where CATASTROPHIC is `Reject`.
 #[inline]
 pub fn decide(pfp: &PfpHeader, policy: &SecurityPolicy) -> Decision {
     // Rule 6: effective risk level (Replay-Enable=0 → forced MEDIUM)
     let effective_risk = pfp.effective_risk_level();
 
-    // CATASTROPHIC + HardOverride → unconditional pass (non-negotiable)
-    if effective_risk == RiskLevel::Catastrophic && pfp.override_flag() == OverrideFlag::HardOverride {
+    // CATASTROPHIC + HardOverride, and only with freshness (A1).
+    if effective_risk == RiskLevel::Catastrophic && pfp.override_permitted() {
         return policy.catastrophic_override;
     }
 
@@ -463,6 +476,16 @@ pub fn decide_from_bytes(bytes: &[u8], policy: &SecurityPolicy) -> Decision {
 
 #[cfg(test)]
 mod tests {
+
+    /// A policy that explicitly opens the override corridor.
+    ///
+    /// A2 (2026-11-01) closed it by default, which is correct; a test that exercises the
+    /// corridor's mechanics therefore has to say so instead of inheriting it.
+    fn corridor_policy() -> SecurityPolicy {
+        let mut p = SecurityPolicy::default();
+        p.catastrophic_override = Decision::HardOverridePass;
+        p
+    }
     use super::*;
 
     fn make_pfp(risk: RiskLevel, override_flag: OverrideFlag, replay_enable: ReplayEnable) -> PfpHeader {
@@ -507,19 +530,21 @@ mod tests {
     }
 
     #[test]
-    fn test_rule6_replay_disabled_forces_medium() {
-        // CATASTROPHIC with Replay-Enable=0 → effective MEDIUM → Pass (not Reject)
+    fn test_rule6_replay_disabled_does_not_lower_the_risk_level() {
+        // A1 (2026-11-01): the freshness axis must not rewrite the consequence axis.
         let pfp = make_pfp(RiskLevel::Catastrophic, OverrideFlag::Normal, ReplayEnable::Disabled);
-        assert_eq!(pfp.effective_risk_level(), RiskLevel::Medium);
-        assert_eq!(decide(&pfp, &SecurityPolicy::default()), Decision::Pass);
+        assert_eq!(pfp.effective_risk_level(), RiskLevel::Catastrophic);
+        assert_eq!(decide(&pfp, &SecurityPolicy::default()), Decision::Reject);
     }
 
     #[test]
-    fn test_rule6_replay_disabled_blocks_catastrophic_override() {
-        // CATASTROPHIC + HardOverride with Replay-Enable=0 → effective MEDIUM → Pass (not HardOverridePass)
+    /// Renamed (A1): the old name said "blocks catastrophic override" while the assertion
+    /// said `Pass` -- a signpost pointing the wrong way, because a reader trusts the name.
+    fn test_rule6_replay_disabled_closes_the_override_corridor() {
         let pfp = make_pfp(RiskLevel::Catastrophic, OverrideFlag::HardOverride, ReplayEnable::Disabled);
-        assert_eq!(pfp.effective_risk_level(), RiskLevel::Medium);
-        assert_eq!(decide(&pfp, &SecurityPolicy::default()), Decision::Pass);
+        assert_eq!(pfp.effective_risk_level(), RiskLevel::Catastrophic, "risk is not rewritten");
+        assert!(!pfp.override_permitted(), "no freshness => no corridor");
+        assert_eq!(decide(&pfp, &corridor_policy()), Decision::Reject);
     }
 
     #[test]
