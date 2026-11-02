@@ -355,15 +355,15 @@ pub struct SecurityPolicy {
 }
 
 impl Default for SecurityPolicy {
+    /// The runtime layer is a **projection** of the config layer, not a second copy of the
+    /// same six fields (A3, 2026-11-01).
+    ///
+    /// Two independent defaults meant two places to change and one place to forget: the
+    /// config path (`PolicyConfig`, TOML) and the runtime path (`SecurityPolicy`,
+    /// `main.rs`) could drift, and changing break-glass in only one of them would have been
+    /// "bypass by moving it". One source, one change.
     fn default() -> Self {
-        Self {
-            low: Decision::Pass,
-            medium: Decision::Pass,
-            critical: Decision::NeedHumanConfirm,
-            catastrophic: Decision::Reject,
-            catastrophic_override: Decision::HardOverridePass,
-            external_additional_check: true,
-        }
+        crate::policy::PolicyConfig::default().to_policy()
     }
 }
 

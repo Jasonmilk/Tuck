@@ -278,47 +278,53 @@ fn hard_override_path_is_reachable_when_replay_enabled() {
 // Guard - single source of truth (SSOT): currently GREEN, it guards the future
 // ===========================================================================
 
-/// Guard (currently green): **the two defaults must be field-by-field equal**.
+/// Guard: the runtime default is a **projection** of the config default, and both must
+/// still equal the golden policy written out literally here.
 ///
-/// Two `impl Default` exist:
-///   - `lib.rs:364`    `impl Default for SecurityPolicy`  (runtime layer, production
-///                     reachable, main.rs:59)
-///   - `policy.rs:285` `impl Default for PolicyConfig`    (config layer, TOML shape)
+/// Why the literal: after A3 the old drift check compared X with X (the projection makes
+/// the two sides the same expression), so it was permanently green -- a detector that died
+/// inside the very change it existed to protect. A golden literal keeps the ability to go
+/// red: it is independent of both implementations.
 ///
-/// Both hard-code the same set of six fields => **SSOT split**: change one and miss
-/// the other and the two defaults drift.
-/// Fix (**add no new entity**): make the runtime layer a **projection** of the config
-/// layer (`SecurityPolicy::default() = PolicyConfig::default().to_policy()`), the same
-/// shape as anaphase's `ACTION_WORDS` + `role_words()`.
-///
-/// This test is green today (the two happen to be equal) => it is a **drift detector**,
-/// not a defect criterion: as soon as someone changes only one side it goes red.
-///
-/// Mutation: change **one** of `lib.rs:364` or `policy.rs:285` without changing the
-///           other => this test turns red.
+/// Mutation: change any default field in `PolicyConfig::default()` (or drop the projection
+/// and change `SecurityPolicy::default()` alone) => this test turns red and names the field.
 #[test]
-fn the_two_defaults_must_not_drift_apart() {
-    let a = SecurityPolicy::default();
-    let b = PolicyConfig::default().to_policy();
+fn the_defaults_are_a_projection_and_match_the_golden_policy() {
+    let runtime = SecurityPolicy::default();
+    let config = PolicyConfig::default().to_policy();
 
-    let fields: Vec<(&str, Decision, Decision)> = vec![
-        ("low", a.low, b.low),
-        ("medium", a.medium, b.medium),
-        ("critical", a.critical, b.critical),
-        ("catastrophic", a.catastrophic, b.catastrophic),
-        ("catastrophic_override", a.catastrophic_override, b.catastrophic_override),
+    // Golden policy, written out. This is the value the two implementations must produce.
+    let golden = [
+        ("low", Decision::Pass),
+        ("medium", Decision::Pass),
+        ("critical", Decision::NeedHumanConfirm),
+        ("catastrophic", Decision::Reject),
+        // A2 (2026-11-01) moves this to Reject; until then the golden records the fact.
+        ("catastrophic_override", Decision::HardOverridePass),
     ];
-    for (name, x, y) in fields {
+    let actual = [
+        ("low", runtime.low),
+        ("medium", runtime.medium),
+        ("critical", runtime.critical),
+        ("catastrophic", runtime.catastrophic),
+        ("catastrophic_override", runtime.catastrophic_override),
+    ];
+    for ((name, want), (name2, got)) in golden.iter().zip(actual.iter()) {
+        assert_eq!(name, name2);
         assert_eq!(
-            format!("{x:?}"),
-            format!("{y:?}"),
-            "the defaults drifted apart on {name}: SecurityPolicy::default() and \
-             PolicyConfig::default().to_policy() disagree -- changing one means changing \
-             the other, or making one a projection of the other"
+            format!("{want:?}"),
+            format!("{got:?}"),
+            "the default drifted from the golden policy on {name}"
         );
     }
     assert_eq!(
-        a.external_additional_check, b.external_additional_check,
-        "external_additional_check drifted apart as well"
+        format!("{:?}", runtime),
+        format!("{:?}", config),
+        "the runtime default must remain a projection of the config default"
+    );
+    assert_eq!(
+        runtime.external_additional_check,
+        true,
+        "external_additional_check must stay on by default"
     );
 }

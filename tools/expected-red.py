@@ -152,6 +152,17 @@ def judge(log, items, touched):
             # `Repo:path:line` or `path:line`
             parts = root_cause.split(":")
             rc_file = ":".join(parts[:-1]) if len(parts) > 2 else parts[0]
+            if ":" in rc_file and rc_file.split(":")[0] not in repos:
+                # The root cause lives in a sibling repo that is not checked out here
+                # (a CI run checks out one repo). "Cannot see it" is not "not touched":
+                # judging red here would punish a correct fix, so the check is skipped
+                # BY NAME rather than silently passing.
+                problems.append(
+                    "%s: cannot verify the root-cause file %s -- that repository is not "
+                    "checked out here. Skipped by name, not silently passed"
+                    % (cid, rc_file)
+                )
+                continue
             if rc_file not in touched:
                 msg += (
                     f"；且本次改动没碰根因文件 {rc_file} ⇒ 疑似【改测试而不是改代码】。"
