@@ -152,7 +152,8 @@ def judge(log, items, touched):
             # `Repo:path:line` or `path:line`
             parts = root_cause.split(":")
             rc_file = ":".join(parts[:-1]) if len(parts) > 2 else parts[0]
-            if ":" in rc_file and rc_file.split(":")[0] not in repos:
+            qual = rc_file.split(":")[0] if ":" in rc_file else None
+            if qual and qual not in repos:
                 # The root cause lives in a sibling repo that is not checked out here
                 # (a CI run checks out one repo). "Cannot see it" is not "not touched":
                 # judging red here would punish a correct fix, so the check is skipped
@@ -163,10 +164,18 @@ def judge(log, items, touched):
                     % (cid, rc_file)
                 )
                 continue
-            # Suffix match: the list writes `src/hitl.rs` (repo-relative to the crate
-            # layout at the time) while git reports `crates/tuck-core/src/hitl.rs`. Exact
-            # comparison made a correct fix look like "edited the test".
-            touched_here = any(t == rc_file or t.endswith("/" + rc_file) for t in touched)
+            # Suffix match, SCOPED TO THIS REPO: the list writes `src/hitl.rs` while git
+            # reports `crates/tuck-core/src/hitl.rs`. A bare suffix match would also accept
+            # `anaphase-helix/src/hitl.rs`, which exists -- a same-named file in another
+            # repo would make an unrelated commit satisfy the check (the `repo_of` mistake:
+            # too wide a match fails silently, in the green direction).
+            # Pool selection, not just a prefix test: an unqualified entry may only be
+            # satisfied by THIS repo's paths (no `Repo:` prefix), a qualified one only by
+            # that repo's paths. Otherwise `anaphase-helix:src/hitl.rs` would satisfy
+            # Tuck's `src/hitl.rs` -- the same file name in two repos, green for the
+            # wrong reason.
+            pool = [t for t in touched if (":" in t) == (qual is not None)]
+            touched_here = any(t == rc_file or t.endswith("/" + rc_file) for t in pool)
             if not touched_here:
                 msg += (
                     f"；且本次改动没碰根因文件 {rc_file} ⇒ 疑似【改测试而不是改代码】。"
