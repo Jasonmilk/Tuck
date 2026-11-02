@@ -1,27 +1,18 @@
-# EXPECTED-RED · 当前只剩 1 条
+# EXPECTED-RED · 现在是 0 条
 
-**2026-11-01 更新**：A1/A2/A3 落地后，9 条判据里 **8 条已转绿并从名单移除**（同批，
-见 `tools/expected-red.list`）。剩下的 1 条属于 B2，不在 A 组范围。
+**2026-11-01**：A1/A2/A3 + B2 落地后，9 条判据**全部转绿并同批移出名单**。
+`tools/expected-red.py` 现在是 `KNOWN-LIVE: 0`——**靠修好，不是靠删条目**（R2/R3 全程在点名）。
 
-| 判据 | 证明的缺陷 | 根因行 | 归属 |
-|---|---|---|---|
-| `unanswered_must_not_be_recorded_as_timed_out` | 「没人应答」被记成「超时」（两义合一） | `src/hitl.rs` `ConfirmStatus` | B2（`NoResponder` + 应答者注册） |
+## 历史 TimedOut 不可回溯（登记，不是测试）
 
-**已转绿（不再是预期红，保留在此作为历史）**：
-`financial_operation_with_replay_disabled_must_not_auto_pass` ·
-`replay_disabled_must_not_turn_catastrophic_reject_into_pass` ·
-`break_glass_must_not_be_enabled_by_default` ·
-`break_glass_must_not_be_enabled_in_policy_config_default` ·
-`no_test_fixture_may_encode_break_glass` ·
-`road48_hard_override_catastrophic_replay_disabled_must_reject` ·
-`financial_operation_with_replay_disabled_must_need_human_confirm` ·
-`catastrophic_with_replay_disabled_must_still_reject`
+B2 之前，`ConfirmStatus::TimedOut` 承载两个事实：「有人被问但没及时答」与「根本没人可问」。
+哈希链 append-only ⇒ **历史上所有 `TimedOut` 里有多少其实是"没人可问"，无法回溯**。
+加 `NoResponder` 之后新条目可分，旧条目不可分 —— 未来读历史的人必须知道这一点，
+否则会把"没人听"读成"有人没听见"。
 
-⇒ 它们从「取证红」变成了**回归网**：任何一次让它们变红的改动都是真回归，而不再是预期。
+⇒ 与 K-15 同族：**落盘之后才发现语义不够用**。现在加是对的，代价是旧数据永久歧义。
 
 ## 变更纪律（不变）
 
-- 清单**只能缩短**。加一行 = 承认又一条判据在证明缺陷，必须同时给修复裁决编号。
-- 清单里的判据**不许 `#[ignore]`、不许改弱断言**。
-- 转绿必须与「从名单移除」**同一提交**，且该提交要触碰它记录的根因文件
-  （`expected-red.py` R2 会点名"改测试而非改代码"）。
+清单**只能缩短**；判据**不许 `#[ignore]` / 不许改弱断言**；转绿必须与「移出名单」同一提交，
+且该提交要触碰它记录的根因文件（`expected-red.py` R2 会点名"改测试而非改代码"）。

@@ -62,6 +62,37 @@ pub enum ConfirmStatus {
     Rejected,
     /// Timed out — frame should be rejected (fail-closed).
     TimedOut,
+    /// **Nobody was registered to answer** (B2, 2026-11-01).
+    ///
+    /// Distinct from `TimedOut` on purpose: "someone was asked and did not answer in time"
+    /// and "there was nobody to ask" are two facts. Before this variant both were recorded
+    /// as `TimedOut`, which is the pipeline-lying-to-itself shape this repo keeps paying
+    /// for: the audit said a human was listening, and nobody was.
+    ///
+    /// The variant name goes into the audit hash (`{:?}` of the status), so it is written
+    /// narrow now: `NoResponder` means exactly one thing and nothing else.
+    NoResponder,
+}
+
+/// Something that will answer confirmation requests (B2).
+///
+/// Registration is a **construction-time declaration**, not a runtime guess: whether a
+/// responder exists is a fact about the gate, so it is decided when the gate is built.
+/// Inferring it from "does anyone still hold the receiver" was rejected -- it cannot tell
+/// "held and not answered" from "not held", and any criterion written on it would be
+/// permanently green.
+pub trait Responder: Send + Sync + std::fmt::Debug {
+    /// Human-readable identity, for the audit row. Not a credential.
+    fn name(&self) -> &str;
+}
+
+/// The manual responder: a test or an operator answers by calling `confirm` / `reject`.
+#[derive(Debug)]
+pub struct ManualResponder;
+impl Responder for ManualResponder {
+    fn name(&self) -> &str {
+        "manual"
+    }
 }
 
 /// Result of a confirmation request.
@@ -100,7 +131,7 @@ impl From<ConfirmResult> for Decision {
 /// use tuck_core::hitl::HumanConfirmGate;
 /// use std::time::Duration;
 ///
-/// let gate = HumanConfirmGate::new(Duration::from_secs(30));
+/// let gate = HumanConfirmGate::new_with_responder(Duration::from_secs(30), Arc::new(ManualResponder));
 ///
 /// // When decide() returns NeedHumanConfirm:
 /// let (id, rx) = gate.request("CRITICAL", "EXECUTIVE", "Delete production database").await;
@@ -115,6 +146,9 @@ impl From<ConfirmResult> for Decision {
 pub struct HumanConfirmGate {
     inner: Arc<Mutex<GateInner>>,
     default_timeout: Duration,
+    /// `None` = nobody is registered to answer. Every request is then recorded
+    /// `NoResponder` instead of `TimedOut` (B2).
+    responder: Option<Arc<dyn Responder>>,
 }
 
 #[derive(Debug)]
@@ -127,6 +161,10 @@ struct GateInner {
 
 impl HumanConfirmGate {
     /// Create a new HITL gate with the given default timeout.
+    /// A gate with **nobody registered to answer**: every request is recorded
+    /// `NoResponder`. This is the honest shape for a deployment that has no human
+    /// channel wired -- the audit then says "nobody was asked" instead of pretending a
+    /// timeout happened.
     pub fn new(default_timeout: Duration) -> Self {
         Self {
             inner: Arc::new(Mutex::new(GateInner {
@@ -134,6 +172,19 @@ impl HumanConfirmGate {
                 history: Vec::new(),
             })),
             default_timeout,
+            responder: None,
+        }
+    }
+
+    /// A gate with a responder registered (B2, 乙: declared at construction).
+    pub fn new_with_responder(default_timeout: Duration, responder: Arc<dyn Responder>) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(GateInner {
+                pending: HashMap::new(),
+                history: Vec::new(),
+            })),
+            default_timeout,
+            responder: Some(responder),
         }
     }
 
@@ -175,6 +226,14 @@ impl HumanConfirmGate {
             status: ConfirmStatus::Pending,
         };
 
+        if self.responder.is_none() {
+            // Nobody is registered to answer: record the fact, do not start a timeout that
+            // would later spell this as `TimedOut`.
+            let mut settled = request.clone();
+            settled.status = ConfirmStatus::NoResponder;
+            self.inner.lock().await.history.push(settled);
+            return (id, rx);
+        }
         {
             let mut inner = self.inner.lock().await;
             inner.pending.insert(id, (request.clone(), tx));
@@ -277,7 +336,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_request_creation() {
-        let gate = HumanConfirmGate::new(Duration::from_secs(30));
+        let gate = HumanConfirmGate::new_with_responder(Duration::from_secs(30), Arc::new(ManualResponder));
         let (id, _rx) = gate.request("CRITICAL", "EXECUTIVE", "Test action").await;
         assert_eq!(gate.pending_count().await, 1);
         let req = gate.get_pending(&id).await.unwrap();
@@ -288,7 +347,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_confirm() {
-        let gate = HumanConfirmGate::new(Duration::from_secs(30));
+        let gate = HumanConfirmGate::new_with_responder(Duration::from_secs(30), Arc::new(ManualResponder));
         let (id, rx) = gate.request("CRITICAL", "EXECUTIVE", "Test action").await;
 
         assert!(gate.confirm(&id).await);
@@ -301,7 +360,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_reject() {
-        let gate = HumanConfirmGate::new(Duration::from_secs(30));
+        let gate = HumanConfirmGate::new_with_responder(Duration::from_secs(30), Arc::new(ManualResponder));
         let (id, rx) = gate.request("CRITICAL", "EXECUTIVE", "Test action").await;
 
         assert!(gate.reject(&id).await);
@@ -312,7 +371,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_timeout_fail_closed() {
-        let gate = HumanConfirmGate::new(Duration::from_millis(100));
+        let gate = HumanConfirmGate::new_with_responder(Duration::from_millis(100), Arc::new(ManualResponder));
         let (_id, rx) = gate.request("CRITICAL", "EXECUTIVE", "Test action").await;
 
         // Wait for timeout
@@ -325,7 +384,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_confirm_already_resolved() {
-        let gate = HumanConfirmGate::new(Duration::from_secs(30));
+        let gate = HumanConfirmGate::new_with_responder(Duration::from_secs(30), Arc::new(ManualResponder));
         let (id, _rx) = gate.request("CRITICAL", "EXECUTIVE", "Test action").await;
 
         assert!(gate.confirm(&id).await);
@@ -335,7 +394,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_pending() {
-        let gate = HumanConfirmGate::new(Duration::from_secs(30));
+        let gate = HumanConfirmGate::new_with_responder(Duration::from_secs(30), Arc::new(ManualResponder));
         let (_id1, _rx1) = gate.request("CRITICAL", "EXECUTIVE", "Action 1").await;
         let (_id2, _rx2) = gate.request("MEDIUM", "RENDER", "Action 2").await;
 
@@ -345,7 +404,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_history() {
-        let gate = HumanConfirmGate::new(Duration::from_secs(30));
+        let gate = HumanConfirmGate::new_with_responder(Duration::from_secs(30), Arc::new(ManualResponder));
         let (id1, _rx1) = gate.request("CRITICAL", "EXECUTIVE", "Action 1").await;
         let (id2, _rx2) = gate.request("MEDIUM", "RENDER", "Action 2").await;
 
@@ -360,7 +419,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_custom_timeout() {
-        let gate = HumanConfirmGate::new(Duration::from_secs(30));
+        let gate = HumanConfirmGate::new_with_responder(Duration::from_secs(30), Arc::new(ManualResponder));
         let (_id, rx) = gate
             .request_with_timeout("CRITICAL", "EXECUTIVE", "Test", Duration::from_millis(50))
             .await;
@@ -382,5 +441,85 @@ mod tests {
             let parsed: ConfirmStatus = serde_json::from_str(&json).unwrap();
             assert_eq!(status, parsed);
         }
+    }
+}
+
+#[cfg(test)]
+mod b2_no_responder {
+    //! B2 (2026-11-01): "nobody was asked" is its own fact.
+    //!
+    //! Four criteria, each necessary:
+    //!   1. no responder registered  -> `NoResponder`
+    //!   2. responder + confirmed    -> `Confirmed`
+    //!   3. **responder + no answer** -> `TimedOut`, NOT `NoResponder`
+    //!   4. the audit hash of the pre-existing variants is unchanged
+    //!
+    //! Criterion 3 is the one that keeps the new variant honest: without it adding the
+    //! variant makes the code green no matter which way the branch is written, because
+    //! nothing checks that the two states stay distinguishable.
+
+    use super::*;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn unregistered_gate_records_no_responder() {
+        let gate = HumanConfirmGate::new(Duration::from_millis(50));
+        let (_id, _rx) = gate.request("Critical", "Executive", "wire 100k").await;
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        let h = gate.history().await;
+        assert_eq!(h.len(), 1);
+        assert_eq!(
+            h[0].status,
+            ConfirmStatus::NoResponder,
+            "a gate with nobody registered must record NoResponder, not TimedOut"
+        );
+    }
+
+    #[tokio::test]
+    async fn registered_and_confirmed_records_confirmed() {
+        let gate = HumanConfirmGate::new_with_responder(
+            Duration::from_secs(30),
+            Arc::new(ManualResponder),
+        );
+        let (id, _rx) = gate.request("Critical", "Executive", "wire 100k").await;
+        assert!(gate.confirm(&id).await);
+        let h = gate.history().await;
+        assert_eq!(h[0].status, ConfirmStatus::Confirmed);
+    }
+
+    #[tokio::test]
+    async fn registered_but_silent_is_timed_out_not_no_responder() {
+        let gate = HumanConfirmGate::new_with_responder(
+            Duration::from_millis(50),
+            Arc::new(ManualResponder),
+        );
+        let (_id, _rx) = gate.request("Critical", "Executive", "wire 100k").await;
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        let h = gate.history().await;
+        assert_eq!(h.len(), 1);
+        assert_eq!(
+            h[0].status,
+            ConfirmStatus::TimedOut,
+            "a registered responder who stayed silent is a TIMEOUT; collapsing it into \
+             NoResponder would make the two states indistinguishable again"
+        );
+        assert_ne!(h[0].status, ConfirmStatus::NoResponder);
+    }
+
+    #[test]
+    fn adding_a_variant_did_not_move_the_audit_hash_of_the_old_ones() {
+        // What enters the chain is `format!("NeedHumanConfirm:{:?}", status)`, so the
+        // variant NAMES are part of the hash preimage. Adding `NoResponder` must not touch
+        // the four that already exist. Asserting the literals makes that mechanical: a
+        // rename anywhere turns this red.
+        assert_eq!(format!("{:?}", ConfirmStatus::Pending), "Pending");
+        assert_eq!(format!("{:?}", ConfirmStatus::Confirmed), "Confirmed");
+        assert_eq!(format!("{:?}", ConfirmStatus::Rejected), "Rejected");
+        assert_eq!(format!("{:?}", ConfirmStatus::TimedOut), "TimedOut");
+        assert_eq!(format!("{:?}", ConfirmStatus::NoResponder), "NoResponder");
+
+        // And the same string that goes into the payload is the one we hash.
+        let preimage = format!("NeedHumanConfirm:{:?}", ConfirmStatus::TimedOut);
+        assert_eq!(preimage, "NeedHumanConfirm:TimedOut");
     }
 }

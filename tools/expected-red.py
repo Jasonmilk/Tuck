@@ -163,7 +163,11 @@ def judge(log, items, touched):
                     % (cid, rc_file)
                 )
                 continue
-            if rc_file not in touched:
+            # Suffix match: the list writes `src/hitl.rs` (repo-relative to the crate
+            # layout at the time) while git reports `crates/tuck-core/src/hitl.rs`. Exact
+            # comparison made a correct fix look like "edited the test".
+            touched_here = any(t == rc_file or t.endswith("/" + rc_file) for t in touched)
+            if not touched_here:
                 msg += (
                     f"；且本次改动没碰根因文件 {rc_file} ⇒ 疑似【改测试而不是改代码】。"
                     "转绿必须与「删掉名单条目」在同一提交，且该提交要触碰根因文件"
@@ -243,9 +247,13 @@ def main():
     if items is None:
         print(f"★ RED 名单不存在：{LIST}（那等于「预期红」这个概念被删掉了）")
         return 1
+    # An empty list is the SUCCESS state, not a fault: every expected-red criterion has
+    # been fixed and de-listed. The tool must then say so and pass -- otherwise "reaching
+    # zero" would be punished, and the pressure would be to keep a fake entry around.
     if not items:
-        print("★ RED 名单为空而本工具仍在 gate 里 —— 要么删掉本工具，要么补回条目")
-        return 1
+        print("KNOWN-LIVE: 0  (expected-red list is empty: every criterion has been fixed "
+              "and removed in the same commit)")
+        return 0
 
     if "--from-log" in sys.argv:
         path = sys.argv[sys.argv.index("--from-log") + 1]
