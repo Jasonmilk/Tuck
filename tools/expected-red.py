@@ -256,13 +256,12 @@ def main():
     if items is None:
         print(f"★ RED 名单不存在：{LIST}（那等于「预期红」这个概念被删掉了）")
         return 1
-    # An empty list is the SUCCESS state, not a fault: every expected-red criterion has
-    # been fixed and de-listed. The tool must then say so and pass -- otherwise "reaching
-    # zero" would be punished, and the pressure would be to keep a fake entry around.
+    # An empty list is the SUCCESS state -- but it must NOT short-circuit the run.
+    # (A version that returned 0 here stopped executing the suite entirely: the gate went
+    # green because nothing ran. Caught by mutating one assertion and watching verify stay
+    # green. "Empty is success" and "empty means skip the tests" are different sentences.)
     if not items:
-        print("KNOWN-LIVE: 0  (expected-red list is empty: every criterion has been fixed "
-              "and removed in the same commit)")
-        return 0
+        print("expected-red list is empty: every criterion has been fixed and de-listed")
 
     if "--from-log" in sys.argv:
         path = sys.argv[sys.argv.index("--from-log") + 1]
