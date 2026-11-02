@@ -299,8 +299,8 @@ fn the_defaults_are_a_projection_and_match_the_golden_policy() {
         ("medium", Decision::Pass),
         ("critical", Decision::NeedHumanConfirm),
         ("catastrophic", Decision::Reject),
-        // A2 (2026-11-01) moves this to Reject; until then the golden records the fact.
-        ("catastrophic_override", Decision::HardOverridePass),
+        // A2 (2026-11-01): not configuring it means "do not break glass".
+        ("catastrophic_override", Decision::Reject),
     ];
     let actual = [
         ("low", runtime.low),

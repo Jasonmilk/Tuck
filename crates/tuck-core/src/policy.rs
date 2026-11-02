@@ -284,7 +284,10 @@ impl Default for PolicyConfig {
                 medium: DecisionConfig::Pass,
                 critical: DecisionConfig::NeedHumanConfirm,
                 catastrophic: DecisionConfig::Reject,
-                catastrophic_override: DecisionConfig::HardOverridePass,
+                // A2 (2026-11-01): not configuring it must mean "do not break glass".
+                // The three rulings that rejected break-glass (ADR-0054 5.2 / ROAD-18 B-4 /
+                // ADR-0004 D7) are only real once the default stops enabling it.
+                catastrophic_override: DecisionConfig::Reject,
             },
             options: PolicyOptions::default(),
         }

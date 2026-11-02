@@ -324,7 +324,7 @@ low = "pass"
 medium = "pass"
 critical = "need_human_confirm"
 catastrophic = "reject"
-catastrophic_override = "hard_override_pass"
+catastrophic_override = "reject"
 "#
         .to_string()
     }
@@ -340,7 +340,7 @@ low = "pass"
 medium = "need_human_confirm"
 critical = "reject"
 catastrophic = "reject"
-catastrophic_override = "hard_override_pass"
+catastrophic_override = "reject"
 "#
         .to_string()
     }
