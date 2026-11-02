@@ -525,8 +525,7 @@ mod tests {
     #[tokio::test]
     async fn test_security_gate_pass() {
         let store = InMemoryCredentialStore::new();
-        let policy = SecurityPolicy::default();
-        let mut gate = TuckSecurityGate::new(policy, store, "tuck_test");
+        let mut gate = TuckSecurityGate::new(SecurityPolicy::default(), store, "tuck_test");
 
         let pfp = make_pfp_bytes(RiskLevel::Low, OverrideFlag::Normal);
         let request = make_request(pfp, None);
@@ -575,10 +574,13 @@ mod tests {
     #[tokio::test]
     async fn test_security_gate_hard_override() {
         let store = InMemoryCredentialStore::new();
-        let policy = SecurityPolicy::default();
+        // Catastrophic with override AND freshness -> HardOverride.
+        // A1: the corridor now needs replay protection ON; A2: it is no longer open by
+        // DEFAULT, so this test states the policy it is testing instead of relying on a
+        // default that was just (correctly) taken away.
+        let mut policy = SecurityPolicy::default();
+        policy.catastrophic_override = Decision::HardOverridePass;
         let mut gate = TuckSecurityGate::new(policy, store, "tuck_test");
-
-        // Catastrophic with override → HardOverride
         let pfp = make_pfp_bytes(RiskLevel::Catastrophic, OverrideFlag::HardOverride);
         let request = make_request(pfp, None);
         let response = gate.process(&request).await;

@@ -129,7 +129,7 @@ impl From<Decision> for DecisionConfig {
 /// medium = "pass"
 /// critical = "need_human_confirm"
 /// catastrophic = "reject"
-/// catastrophic_override = "hard_override_pass"
+/// catastrophic_override = "reject"
 ///
 /// [policy.options]
 /// external_additional_check = true
@@ -349,9 +349,10 @@ mod tests {
         assert_eq!(config.risk_levels.low, DecisionConfig::Pass);
         assert_eq!(config.risk_levels.critical, DecisionConfig::NeedHumanConfirm);
         assert_eq!(config.risk_levels.catastrophic, DecisionConfig::Reject);
+        // A2 (2026-11-01): not configuring it must not enable break-glass.
         assert_eq!(
             config.risk_levels.catastrophic_override,
-            DecisionConfig::HardOverridePass
+            DecisionConfig::Reject
         );
     }
 
@@ -363,7 +364,8 @@ mod tests {
         assert_eq!(policy.medium, Decision::Pass);
         assert_eq!(policy.critical, Decision::NeedHumanConfirm);
         assert_eq!(policy.catastrophic, Decision::Reject);
-        assert_eq!(policy.catastrophic_override, Decision::HardOverridePass);
+        // A2 (2026-11-01): the default no longer opens the corridor.
+        assert_eq!(policy.catastrophic_override, Decision::Reject);
         assert!(policy.external_additional_check);
     }
 
@@ -391,7 +393,8 @@ mod tests {
         assert!(toml_str.contains("low = \"pass\""));
         assert!(toml_str.contains("critical = \"need_human_confirm\""));
         assert!(toml_str.contains("catastrophic = \"reject\""));
-        assert!(toml_str.contains("catastrophic_override = \"hard_override_pass\""));
+        // A2 (2026-11-01): the serialised default closes the corridor too.
+        assert!(toml_str.contains("catastrophic_override = \"reject\""));
     }
 
     #[test]
@@ -418,7 +421,7 @@ low = "pass"
 medium = "pass"
 critical = "reject"
 catastrophic = "reject"
-catastrophic_override = "hard_override_pass"
+catastrophic_override = "reject"
 "#;
         let result = PolicyConfig::from_toml(toml_str);
         assert!(matches!(
@@ -461,7 +464,7 @@ low = "pass"
 medium = "need_human_confirm"
 critical = "reject"
 catastrophic = "reject"
-catastrophic_override = "hard_override_pass"
+catastrophic_override = "reject"
 
 [options]
 external_additional_check = true

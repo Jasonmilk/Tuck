@@ -499,7 +499,11 @@ mod tests {
     #[test]
     fn test_catastrophic_override_pass() {
         let pfp = make_pfp(RiskLevel::Catastrophic, OverrideFlag::HardOverride, ReplayEnable::Enabled);
-        assert_eq!(decide(&pfp, &SecurityPolicy::default()), Decision::HardOverridePass);
+        // A2 (2026-11-01) closed the corridor by default; the mechanics still work when
+        // a deployment opens it explicitly.
+        let mut policy = SecurityPolicy::default();
+        policy.catastrophic_override = Decision::HardOverridePass;
+        assert_eq!(decide(&pfp, &policy), Decision::HardOverridePass);
     }
 
     #[test]

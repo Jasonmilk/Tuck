@@ -793,7 +793,9 @@ mod tests {
 
     #[test]
     fn test_decide_with_sap_pass_no_sap() {
-        let policy = crate::SecurityPolicy::default();
+        // A2 closed the corridor by default; state the policy under test.
+        let mut policy = crate::SecurityPolicy::default();
+        policy.catastrophic_override = crate::Decision::HardOverridePass;
         let mut cache = LruReplayCache::new();
         let pfp = make_pfp(crate::RiskLevel::Low, crate::OverrideFlag::Normal);
         let result = decide_with_sap(&pfp, None, "source1", &mut cache, None, &policy);
@@ -836,7 +838,10 @@ mod tests {
 
     #[test]
     fn test_decide_with_sap_hard_override() {
-        let policy = crate::SecurityPolicy::default();
+        // A2 closed the corridor by default; A1 requires freshness for it to open.
+        // This test is about the corridor's mechanics, so it states both.
+        let mut policy = crate::SecurityPolicy::default();
+        policy.catastrophic_override = crate::Decision::HardOverridePass;
         let mut cache = LruReplayCache::new();
         // Catastrophic with override → HardOverridePass (SAP not checked)
         let pfp = make_pfp(crate::RiskLevel::Catastrophic, crate::OverrideFlag::HardOverride);

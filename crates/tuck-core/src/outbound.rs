@@ -320,9 +320,13 @@ mod tests {
         let store = InMemoryCredentialStore::new();
         store.insert("env:test/emergency", b"emergency-token");
 
-        let handler = OutboundHandler::new(SecurityPolicy::default(), store);
+        // A2 (2026-11-01): the corridor is no longer open by default, so this test states
+        // the policy it exercises instead of relying on the default that was taken away.
+        let mut policy = SecurityPolicy::default();
+        policy.catastrophic_override = crate::Decision::HardOverridePass;
+        let handler = OutboundHandler::new(policy, store);
 
-        // Catastrophic with override → HardOverridePass
+        // Catastrophic with override -> HardOverridePass
         let pfp = make_pfp(RiskLevel::Catastrophic, OverrideFlag::HardOverride);
         let pfp_value = pfp_header_value(&pfp);
         let headers = vec![

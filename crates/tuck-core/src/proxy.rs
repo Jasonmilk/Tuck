@@ -354,10 +354,12 @@ mod tests {
 
     #[test]
     fn test_intercept_hard_override() {
-        let policy = SecurityPolicy::default();
+        // A2 closed the corridor by default; this test states the policy it exercises.
+        let mut policy = SecurityPolicy::default();
+        policy.catastrophic_override = Decision::HardOverridePass;
         let interceptor = HttpInterceptor::new(policy);
 
-        // Catastrophic with override → HardOverridePass
+        // Catastrophic with override -> HardOverridePass
         let pfp = make_pfp(RiskLevel::Catastrophic, OverrideFlag::HardOverride);
         let header_value = pfp_header_value(&pfp);
         let headers = vec![(PFP_HEADER, header_value.as_str())];
