@@ -268,10 +268,16 @@ def main():
         with open(path, encoding="utf-8") as fh:
             log = fh.read()
     else:
-        r = subprocess.run(
-            ["cargo", "test", "--workspace", "--all-features", "--no-fail-fast"],
-            cwd=ROOT, capture_output=True, text=True,
-        )
+        try:
+            r = subprocess.run(
+                ["cargo", "test", "--workspace", "--all-features", "--no-fail-fast"],
+                cwd=ROOT, capture_output=True, text=True,
+            )
+        except OSError as e:
+            # 工具缺失 = 不可量，不是「失败」也不是「没测出来」（C-058 同族）：
+            # 原来直接 traceback，等于把"没跑"报成"工具坏了"。
+            print(f"UNMEASURABLE: 跑不了 cargo（{e}）—— 这不是红，是没测；rc=4")
+            return 4
         log = r.stdout + r.stderr
         with open("/tmp/tuck_expected_red.log", "w", encoding="utf-8") as fh:
             fh.write(log)
